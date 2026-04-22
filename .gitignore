@@ -8,3 +8,18 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Test / data
+.pytest_cache/
+data/
+*.parquet
+.DS_Store
+
+# Personal notes — not for public repo
+google_sheet.md
+summary.md
+mydeck.txt
+example.txt
+
+# POC
+main.py
