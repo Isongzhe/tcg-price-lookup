@@ -1,6 +1,6 @@
 # tcg-price-lookup
 
-[![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-green.svg)](./LICENSE)
 [![Tests](https://img.shields.io/badge/tests-35%20passing-brightgreen.svg)](./tests)
 
@@ -73,27 +73,39 @@ visible in the terminal regardless of how `stdout` is redirected.
 
 ## Requirements
 
-- Python 3.13 or later
+- Python 3.11 or later
 - [uv](https://github.com/astral-sh/uv) package manager (recommended)
 
 Python dependencies are declared in `pyproject.toml` and installed
-automatically:
+automatically. The core install is intentionally small:
 
 | Package | Purpose |
 |---|---|
 | `curl_cffi` | HTTP client with browser TLS fingerprint emulation |
-| `polars` | Columnar DataFrame library for Parquet I/O |
-| `duckdb` | Embedded SQL engine for historical queries |
 | `rich` | Progress bars and formatted terminal output on stderr |
+
+An optional `history` extra adds `polars` + `duckdb` for local snapshot
+storage and SQL querying. This is a **preview feature**: the CLI writes to
+`data/snapshots.parquet` after each run when the extra is installed, but
+there is no user-facing command yet for querying that file — you need to
+call `tcg.storage.query()` from a Python shell. Most users should leave
+it disabled.
 
 ---
 
 ## Installation
 
 ```bash
-git clone https://github.com/<your-username>/tcg-price-lookup.git
+git clone https://github.com/Isongzhe/tcg-price-lookup.git
 cd tcg-price-lookup
 uv sync
+```
+
+To additionally install the optional `history` extras (preview — see
+Requirements above):
+
+```bash
+uv sync --extra history
 ```
 
 Verify the installation:
@@ -102,7 +114,9 @@ Verify the installation:
 uv run pytest
 ```
 
-All 35 tests should pass in under 5 seconds. No network access is required.
+All tests should pass in under 10 seconds. Storage tests are skipped
+automatically when the `history` extras are not installed. No network
+access is required.
 
 ---
 
@@ -235,10 +249,14 @@ printing a seller is actually offering.
 
 ---
 
-## Historical Queries
+## Historical Queries (preview, optional)
 
-Every run appends raw price events to `data/snapshots.parquet` in long
-format. Queries can be issued through DuckDB:
+> Requires the `history` extras: `uv sync --extra history`.
+> Not installed by default. See Requirements for rationale.
+
+When installed, every run appends raw price events to
+`data/snapshots.parquet` in long format. Queries can be issued through
+DuckDB:
 
 ```python
 from tcg.storage import query

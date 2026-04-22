@@ -1,7 +1,12 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
-import polars as pl
+import pytest
+
+# Storage features depend on the `history` optional extras (polars + duckdb).
+# When the extras are not installed, skip the whole module rather than erroring.
+pl = pytest.importorskip("polars")
+pytest.importorskip("duckdb")
 
 from tcg.models import Listing, MarketPrice, Sale
 from tcg.storage import append_snapshot, query, snapshot_to_rows
