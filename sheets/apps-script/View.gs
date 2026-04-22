@@ -1,57 +1,60 @@
 /**
- * View Configurations
- * 您可以在此自定義隱藏清單與分組深度
+ * View configuration.
+ * Declares which columns to hide by default and how aggressively to reset
+ * existing groupings before reapplying.
  */
 const VIEW_CONFIG = {
-  // 定義不需要在截圖中顯示的欄位標題
+  // Columns hidden from the formatted view. Looked up by header name,
+  // so append-only changes to the TSV schema do not break anything.
   HIDE_LIST: [
     "set_name",
-    "product_id", 
-    "sku_id", 
-    "image_url", 
-    "missing", 
-    "mp_sample", 
-    "released", 
-    "condition", 
-    "Card Preview" // 原始資料中若有此標題也一併隱藏，因為我們已將圖移至 A 欄
+    "product_id",
+    "sku_id",
+    "image_url",
+    "missing",
+    "mp_sample",
+    "released",
+    "condition",
+    "Card Preview" // in case an older run left this header in the data
   ],
-  
-  // 清除舊分組時嘗試的次數 (深度)
+
+  // How many levels of existing column grouping to clear before reapplying.
   MAX_GROUP_DEPTH_RESET: 3,
-  
-  // 保護欄位索引 (通常 A 欄為 1，不應被自動隱藏)
+
+  // Columns at or below this 1-based index are never auto-hidden.
+  // Column 1 is the preview column and must always stay visible.
   PROTECTED_COLUMN_INDEX: 1
 };
 
 /**
- * 建立分組檢視並隱藏冗餘欄位
+ * Group and hide the metadata columns named in VIEW_CONFIG.HIDE_LIST.
  */
 function createGroupedView(sheet) {
   const lastCol = sheet.getLastColumn();
   if (lastCol === 0) return;
 
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-  
-  // 1. 清除現有的所有分組，確保 Pipeline 重新執行時畫面乾淨
+
+  // 1. Reset any existing column groupings so the pipeline is idempotent.
   try {
     for (let i = 0; i < VIEW_CONFIG.MAX_GROUP_DEPTH_RESET; i++) {
       sheet.getRange(1, 1, 1, lastCol).shiftColumnGroupDepth(-1);
     }
   } catch (e) {
-    // 若無更多分組層級可移除則忽略
+    // No more group levels to remove; ignore.
   }
 
-  // 2. 遍歷標題列，根據 HIDE_LIST 進行隱藏與分組
+  // 2. Walk the header row and hide/group each matching column.
   headers.forEach((title, index) => {
     const colPosition = index + 1;
-    
-    // 跳過受保護的 A 欄，僅處理 hideList 中的欄位
+
+    // Skip the protected column and anything not in the hide list.
     if (colPosition > VIEW_CONFIG.PROTECTED_COLUMN_INDEX && VIEW_CONFIG.HIDE_LIST.includes(title)) {
       try {
-        // 將欄位加入分組 (上方會出現 [+] 符號)
+        // Add the column to a group (a [+] toggle appears above the column letters).
         sheet.getRange(1, colPosition).shiftColumnGroupDepth(1);
-        // 預設執行隱藏
-        sheet.hideColumns(colPosition); 
+        // Hide it by default; the user can expand via the toggle.
+        sheet.hideColumns(colPosition);
       } catch (e) {
         console.warn("Could not group/hide column: " + title);
       }
