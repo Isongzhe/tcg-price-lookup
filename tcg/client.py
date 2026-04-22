@@ -6,7 +6,14 @@ from typing import Any
 
 from curl_cffi import requests
 
-from tcg.models import AutocompleteHit, Listing, MarketPrice, ProductDetails, Sale
+from tcg.models import (
+    AutocompleteHit,
+    Listing,
+    MarketPrice,
+    ProductDetails,
+    ProductSearchResult,
+    Sale,
+)
 
 _IMPERSONATE = "chrome120"
 
@@ -101,6 +108,63 @@ class TCGplayerClient:
         if product_line:
             hits = [h for h in hits if h.product_line_name == product_line]
         return hits
+
+    def search_products(
+        self,
+        card_name: str,
+        *,
+        product_line: str | None = None,
+        size: int = 20,
+    ) -> list[ProductSearchResult]:
+        """Find every product matching an exact card name.
+
+        Uses the frontend search endpoint at
+        mp-search-api.tcgplayer.com/v1/search/request. Unlike autocomplete,
+        this returns one row per product, which is how reprints surface:
+        the same card name across multiple sets will produce multiple
+        results.
+
+        Results are returned in the order TCGplayer's relevance algorithm
+        ranks them; callers that want release-date ordering should sort
+        on the `release_date` field.
+        """
+        filters_term: dict[str, list[str]] = {"productName": [card_name]}
+        if product_line:
+            # The search API expects the lowercase URL-like form
+            # ("grand archive", "magic", "pokemon"). Translate common
+            # display names to that form.
+            filters_term["productLineName"] = [product_line.lower().replace(" tcg", "").strip()]
+        payload = {
+            "algorithm": "revenue_exp_v2_1",
+            "from": 0,
+            "size": size,
+            "filters": {"term": filters_term, "range": {}, "match": {}},
+            "listingSearch": {"filters": {"term": {}, "range": {}, "exclude": {}}},
+            "context": {"cart": {}, "shippingCountry": "US"},
+            "settings": {"useFuzzySearch": False, "didYouMean": {}},
+        }
+        data = self._request(
+            "POST",
+            "https://mp-search-api.tcgplayer.com/v1/search/request",
+            params={"mpfev": "5061"},
+            json=payload,
+        )
+        if not isinstance(data, dict):
+            return []
+        results = data.get("results") or []
+        if not results or not isinstance(results, list):
+            return []
+        items = results[0].get("results") if isinstance(results[0], dict) else None
+        if not items:
+            return []
+        # Exact-name filter: the API may return fuzzy matches even with
+        # useFuzzySearch=False.
+        lowered = card_name.strip().lower()
+        return [
+            ProductSearchResult.from_api(d)
+            for d in items
+            if str(d.get("productName", "")).strip().lower() == lowered
+        ]
 
     def product_details(self, product_id: int) -> ProductDetails | None:
         """/v2/product/{id}/details — authoritative Market Price + metadata."""
