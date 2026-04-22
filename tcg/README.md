@@ -36,7 +36,7 @@ and expose a `from_api` classmethod for deserializing API responses.
 | Class | Source API | Key Fields | Purpose |
 |---|---|---|---|
 | `AutocompleteHit` | `autocomplete` | `product_id`, `product_name`, `product_line_name`, `score` | One entry from a name search |
-| `ProductDetails` | `/v2/product/{id}/details` | `market_price`, `skus`, `rarity_name`, `set_name` | Product metadata plus SKU list |
+| `ProductDetails` | `/v2/product/{id}/details` | `market_price`, `skus`, `rarity_name`, `set_name`, `set_code`, `collector_number`, `image_url` | Product metadata plus SKU list |
 | `Sku` | `ProductDetails.skus[]` | `sku_id`, `printing`, `condition`, `language` | One SKU = product × printing × condition × language |
 | `MarketPrice` | `/pricepoints/marketprice/skus/search` | `sku_id`, `market_price`, `price_count`, `calculated_at` | Per-SKU market statistics |
 | `Sale` | `/product/{id}/latestsales` | `purchase_price`, `order_date`, `variant`, `condition` | One historical sale |

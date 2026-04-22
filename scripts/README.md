@@ -65,23 +65,31 @@ endpoint returns multiple candidates:
 
 ### Output Columns
 
-Nineteen columns per row, one row per `(card × printing × condition)` tuple:
+Twenty-two columns per row, one row per `(card × printing × condition)`
+tuple:
 
 ```
 section          qty              card_name         matched_name
-set_name         rarity           product_id        sku_id
+set_name         set_code         number            rarity
+product_id       sku_id
 printing         condition
 market_price     mp_sample        most_recent_sale  sale_avg
 sale_count       listing_min      listing_avg       listing_count
+image_url
 missing
 ```
 
 Column notes:
 
+- **`set_code`** is TCGplayer's short set identifier (e.g. `DTR1E`, `PTM`).
+- **`number`** is the collector number within the set (e.g. `004`, `013`).
+  Useful when distinguishing reprints that share a name but not a number.
 - **`market_price`** is fetched per-SKU. Normal and Foil rows carry
   independent values.
 - **`mp_sample`** is the number of historical sales underlying the market
   price. Values below three should be treated as indicative only.
+- **`image_url`** is a 200 px CDN URL. Wrap with `=IMAGE()` in Google
+  Sheets to render thumbnails.
 - **`missing`** contains a reason string when the card could not be resolved
   or an API call failed; it is empty otherwise.
 
