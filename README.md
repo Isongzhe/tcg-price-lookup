@@ -56,6 +56,9 @@ visible in the terminal regardless of how `stdout` is redirected.
 - **Spreadsheet-friendly output.** Tab-separated values on `stdout`;
   progress and totals on `stderr`. Pipeable to any clipboard utility or
   file.
+- **Card set, collector number, and image URL.** Each row carries the set
+  code, collector number, and a CDN image URL suitable for Google Sheets'
+  `=IMAGE()` function.
 - **Historical snapshots.** Each run appends to a local Parquet file that
   can be queried with DuckDB for price-trend analysis.
 - **Polite by default.** Sequential requests with a configurable per-card
@@ -77,6 +80,7 @@ automatically:
 | `curl_cffi` | HTTP client with browser TLS fingerprint emulation |
 | `polars` | Columnar DataFrame library for Parquet I/O |
 | `duckdb` | Embedded SQL engine for historical queries |
+| `rich` | Progress bars and formatted terminal output on stderr |
 
 ---
 
@@ -172,30 +176,47 @@ prompting). Output format is human-readable; use `fetch_deck` for analysis.
 
 ## Output Format
 
-One row per `(card × printing × condition)` tuple. Nineteen columns,
+One row per `(card × printing × condition)` tuple. Twenty-two columns,
 tab-separated:
 
 ```
 section          qty              card_name         matched_name
-set_name         rarity           product_id        sku_id
+set_name         set_code         number            rarity
+product_id       sku_id
 printing         condition
 market_price     mp_sample        most_recent_sale  sale_avg
 sale_count       listing_min      listing_avg       listing_count
+image_url
 missing
 ```
 
 | Column | Meaning |
 |---|---|
+| `set_name`, `set_code`, `number` | Set information. `set_code` is TCGplayer's short identifier (e.g. `DTR1E`, `PTM`); `number` is the collector number within the set (e.g. `004`). |
+| `rarity` | Rarity classification (e.g. `Super Rare`, `Ultra Rare`). |
 | `market_price` | TCGplayer's authoritative per-SKU Market Price. Normal and Foil variants carry distinct values. |
 | `mp_sample` | Number of historical sales underlying Market Price. Values below three should be treated as indicative only. |
 | `most_recent_sale` | Most recent actual sale by order date, per variant. |
 | `sale_avg`, `sale_count` | Mean and count of recent sales within the fetched window. |
 | `listing_min`, `listing_avg`, `listing_count` | Statistics over currently active listings. |
+| `image_url` | TCGplayer CDN image URL (200 px wide). Paste into Google Sheets and wrap with `=IMAGE()` to render a thumbnail in the cell. |
 | `missing` | Failure reason if the card could not be resolved or a request failed. Empty for successful rows. |
 
 A reference subtotal (Normal NM and Foil NM) is written to `stderr` after
-processing. These are informational; callers are expected to aggregate in a
-spreadsheet or downstream tool.
+processing as a colorized table. These are informational; callers are
+expected to aggregate in a spreadsheet or downstream tool.
+
+### Displaying images in Google Sheets
+
+After pasting the TSV, wrap the `image_url` column values with `=IMAGE(...)`
+to render thumbnails directly in cells. For example, if the URL is in
+column `U`:
+
+```
+=IMAGE(U2)
+```
+
+The CDN images are 200 px wide, which renders well in standard row heights.
 
 ---
 

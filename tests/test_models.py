@@ -113,6 +113,38 @@ def test_market_price_parses_full_payload():
     assert m.calculated_at == "2026-04-05T06:02:19.914Z"
 
 
+def test_product_details_parses_set_code_and_collector_number():
+    d = ProductDetails.from_api({
+        "productId": 644912,
+        "productName": "Alice, Golden Queen",
+        "setName": "Distorted Reflections",
+        "setCode": "DTR1E",
+        "rarityName": "Super Rare",
+        "marketPrice": 3.68,
+        "formattedAttributes": {"Rarity": "Super Rare", "Number": "004"},
+        "customAttributes": {"number": "004", "element": "Norm"},
+    })
+    assert d.set_code == "DTR1E"
+    assert d.collector_number == "004"
+
+
+def test_product_details_collector_number_falls_back_to_custom_attributes():
+    # When formattedAttributes is absent, fall back to customAttributes.number.
+    d = ProductDetails.from_api({
+        "productId": 1,
+        "productName": "X",
+        "setName": "Y",
+        "customAttributes": {"number": "042"},
+    })
+    assert d.collector_number == "042"
+
+
+def test_product_details_image_urls_are_cdn_links():
+    d = ProductDetails.from_api({"productId": 644912, "productName": "X", "setName": "Y"})
+    assert d.image_url == "https://tcgplayer-cdn.tcgplayer.com/product/644912_200w.jpg"
+    assert d.image_url_large == "https://tcgplayer-cdn.tcgplayer.com/product/644912_in_1000x1000.jpg"
+
+
 def test_product_details_parses_skus():
     d = ProductDetails.from_api({
         "productId": 644912,

@@ -125,6 +125,40 @@ def test_retry_on_403(client):
     assert call_count["n"] == 2
 
 
+def test_autocomplete_drops_null_product_id_hits(client):
+    """Regression: TCGplayer occasionally returns autocomplete rows with
+    product-id=null (e.g. 'Lost Providence'). These must be filtered out
+    so downstream code never constructs .../product/None/details URLs."""
+    c, fake = client
+    payload = {
+        "products": [
+            {
+                "duplicate": True,
+                "product-id": None,
+                "product-name": "Lost Providence",
+                "product-line-name": "Grand Archive TCG",
+                "set-name": "",
+                "score": 3.5,
+            },
+            {
+                "duplicate": False,
+                "product-id": 644912,
+                "product-name": "Alice, Golden Queen",
+                "product-line-name": "Grand Archive TCG",
+                "set-name": "Distorted Reflections",
+                "score": 3.1,
+            },
+        ]
+    }
+    fake.set("data.tcgplayer.com/autocomplete", FakeResponse(200, payload))
+
+    hits = c.autocomplete("any")
+
+    assert len(hits) == 1
+    assert hits[0].product_id == 644912
+    assert all(h.product_id is not None for h in hits)
+
+
 def test_error_raises_after_retry(client):
     c, fake = client
 

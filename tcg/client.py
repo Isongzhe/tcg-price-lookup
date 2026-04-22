@@ -93,6 +93,11 @@ class TCGplayerClient:
             },
         )
         hits = [AutocompleteHit.from_api(p) for p in data.get("products", [])]
+        # Drop hits that cannot be resolved to a concrete product. TCGplayer
+        # sometimes returns suggestion rows with a null product-id (e.g. the
+        # name exists across multiple products but is not disambiguated, or
+        # an upcoming product that is not yet listed).
+        hits = [h for h in hits if h.product_id is not None and not h.duplicate]
         if product_line:
             hits = [h for h in hits if h.product_line_name == product_line]
         return hits
