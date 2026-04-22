@@ -314,56 +314,27 @@ def print_tsv(rows: list[DeckRow], variants_filter: set[str] | None = None) -> N
             ]))
 
 
-def print_summary(rows: list[DeckRow]) -> None:
-    """Reference totals. Real aggregation is Sheet's job."""
+def print_summary(rows: list[DeckRow], stdout_piped: bool) -> None:
+    """Post-run UX focused on what the user needs to act on:
+    a loud banner for cards that failed, a one-line status count,
+    and a clipboard hint when stdout was piped.
+
+    Aggregation totals are intentionally omitted — that belongs in the
+    spreadsheet where the user controls which printing/condition counts.
+    """
+    from rich.panel import Panel
     from rich.table import Table
 
     missing = [r for r in rows if r.missing_reason]
-
-    def total_for(printing: str, condition: str = "Near Mint") -> tuple[float, int]:
-        total = 0.0
-        n = 0
-        for r in rows:
-            v = next((v for v in r.variants
-                      if v.printing == printing and v.condition == condition), None)
-            if v and v.market_price is not None:
-                total += v.market_price * r.quantity
-                n += 1
-        return total, n
-
-    normal_total, normal_n = total_for("Normal")
-    foil_total, foil_n = total_for("Foil")
-
-    summary = Table(
-        title="Reference totals (NM Market Price × qty)",
-        title_style="bold",
-        show_header=True,
-        header_style="bold dim",
-    )
-    summary.add_column("Printing", style="cyan")
-    summary.add_column("Total (USD)", justify="right", style="green")
-    summary.add_column("Cards priced", justify="right", style="dim")
-    summary.add_row("Normal", f"${normal_total:.2f}", f"{normal_n}/{len(rows)}")
-    if foil_n > 0:
-        summary.add_row("Foil", f"${foil_total:.2f}", f"{foil_n}/{len(rows)}")
+    ok = len(rows) - len(missing)
 
     console.print()
-    console.print(summary)
-    console.print(
-        "[dim]Real aggregation lives in your spreadsheet — "
-        "use SUMPRODUCT / QUERY grouped by printing.[/dim]"
-    )
 
     if missing:
-        miss_table = Table(
-            title="Missing",
-            title_style="bold red",
-            show_header=True,
-            header_style="bold dim",
-        )
+        miss_table = Table(show_header=True, header_style="bold white", box=None)
         miss_table.add_column("Section", style="dim")
-        miss_table.add_column("Qty", justify="right")
-        miss_table.add_column("Card")
+        miss_table.add_column("Qty", justify="right", style="dim")
+        miss_table.add_column("Card", style="bold yellow")
         miss_table.add_column("Reason", style="red")
         for r in missing:
             miss_table.add_row(
@@ -372,8 +343,32 @@ def print_summary(rows: list[DeckRow]) -> None:
                 r.card_name,
                 r.missing_reason or "",
             )
-        console.print()
-        console.print(miss_table)
+        console.print(
+            Panel(
+                miss_table,
+                title=f"[bold red]NOT FOUND — {len(missing)} card(s) need attention[/bold red]",
+                border_style="red",
+                padding=(1, 2),
+            )
+        )
+
+    status_style = "green" if not missing else "yellow"
+    status_line = f"[{status_style}]{ok}/{len(rows)} cards priced[/{status_style}]"
+    if missing:
+        status_line += f"  [red]· {len(missing)} missing[/red]"
+    console.print(status_line)
+
+    if stdout_piped:
+        console.print(
+            "[cyan]TSV sent to stdout.[/cyan] "
+            "[dim]If you piped to `pbcopy` / `xclip` / `wl-copy`, "
+            "it is on your clipboard now — paste into Sheets.[/dim]"
+        )
+    else:
+        console.print(
+            "[dim]TSV printed above. Pipe to `| pbcopy` "
+            "(macOS) or `| xclip -selection clipboard` (Linux) to copy.[/dim]"
+        )
 
 
 def read_input(source: str) -> str:
@@ -469,7 +464,10 @@ def main(argv: list[str] | None = None) -> int:
             r.variants = [v for v in r.variants if v.condition in conditions_filter]
 
     print_tsv(rows, variants_filter=printings_filter)
-    print_summary(rows)
+    # If stdout is not a TTY we assume the caller piped it somewhere
+    # (clipboard utility, file, another program). Surface a hint.
+    stdout_piped = not sys.stdout.isatty()
+    print_summary(rows, stdout_piped=stdout_piped)
 
     if args.json_out:
         Path(args.json_out).write_text(
