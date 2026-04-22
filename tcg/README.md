@@ -39,9 +39,9 @@ and expose a `from_api` classmethod for deserializing API responses.
 | `ProductDetails` | `/v2/product/{id}/details` | `market_price`, `skus`, `rarity_name`, `set_name`, `set_code`, `collector_number`, `image_url` | Product metadata plus SKU list |
 | `ProductSearchResult` | `/v1/search/request` | `product_id`, `set_name`, `release_date`, `collector_number`, `market_price` | One row per product; used to enumerate reprints sharing a card name |
 | `Sku` | `ProductDetails.skus[]` | `sku_id`, `printing`, `condition`, `language` | One SKU = product × printing × condition × language |
-| `MarketPrice` | `/pricepoints/marketprice/skus/search` | `sku_id`, `market_price`, `price_count`, `calculated_at` | Per-SKU market statistics |
-| `Sale` | `/product/{id}/latestsales` | `purchase_price`, `order_date`, `variant`, `condition` | One historical sale |
-| `Listing` | `/v1/product/{id}/listings` | `price`, `printing`, `condition`, `seller_name` | One currently active listing |
+| `MarketPrice` | `/pricepoints/marketprice/skus/search` | `sku_id`, `market_price`, `price_count`, `calculated_at` | Per-SKU market price aggregated by TCGplayer over roughly the last 30 days of sales. `price_count` is the underlying sample size; `calculated_at` is when the aggregate was last recomputed server-side. |
+| `Sale` | `/product/{id}/latestsales` | `purchase_price`, `order_date`, `variant`, `condition` | One completed sale. The endpoint returns the most recent N sales in reverse chronological order; there is no explicit time filter, so the span of returned data is driven by how often the card actually trades. |
+| `Listing` | `/v1/product/{id}/listings` | `price`, `printing`, `condition`, `seller_name` | One listing active on TCGplayer at the moment of the call. Not historical — refetch to see updates. |
 
 ### SKU Hierarchy
 
