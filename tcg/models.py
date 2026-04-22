@@ -6,20 +6,26 @@ from typing import Any
 
 @dataclass(frozen=True, slots=True)
 class AutocompleteHit:
-    product_id: int
+    # TCGplayer occasionally returns autocomplete entries with a null
+    # product-id (e.g. the card name exists but is not yet assigned to a
+    # specific product, such as pre-release or duplicate aggregates).
+    # Callers must check for None before issuing downstream requests.
+    product_id: int | None
     product_name: str
     product_line_name: str
     set_name: str
     score: float
+    duplicate: bool = False
 
     @classmethod
     def from_api(cls, d: dict[str, Any]) -> AutocompleteHit:
         return cls(
-            product_id=d["product-id"],
-            product_name=d["product-name"],
-            product_line_name=d["product-line-name"],
-            set_name=d["set-name"],
-            score=d["score"],
+            product_id=d.get("product-id"),
+            product_name=d.get("product-name", ""),
+            product_line_name=d.get("product-line-name", ""),
+            set_name=d.get("set-name", ""),
+            score=float(d.get("score") or 0.0),
+            duplicate=bool(d.get("duplicate", False)),
         )
 
 
