@@ -105,6 +105,7 @@ class DeckRow:
     set_code: str | None = None
     collector_number: str | None = None
     rarity: str | None = None
+    release_date: str | None = None     # ISO-8601, used for new->old reprint ordering
     image_url: str | None = None
     variants: list[VariantStats] = field(default_factory=list)
     missing_reason: str | None = None
@@ -197,42 +198,21 @@ def build_variants(
     return out
 
 
-def enrich(
+def _fetch_one_product(
     client: TCGplayerClient,
     entry: DeckEntry,
-    product_line: str | None,
+    product_id: int,
+    fallback_name: str,
+    fallback_set: str | None,
+    fallback_release_date: str | None,
     listings_limit: int,
     sales_limit: int,
 ) -> tuple[DeckRow, list, list]:
-    try:
-        hits = client.autocomplete(entry.card_name)
-    except TCGplayerError as e:
-        return (
-            DeckRow(
-                entry.section, entry.quantity, entry.card_name,
-                None, None, None,
-                missing_reason=f"autocomplete failed: {e}",
-            ),
-            [], [],
-        )
+    """Fetch all per-variant price data for a single product and build a DeckRow."""
+    details = client.product_details(product_id)
+    sales = client.latest_sales(product_id, limit=sales_limit)
+    listings = client.listings(product_id, limit=listings_limit)
 
-    hit = pick_best_hit(hits, entry.card_name, product_line)
-    if hit is None:
-        return (
-            DeckRow(
-                entry.section, entry.quantity, entry.card_name,
-                None, None, None,
-                missing_reason="no match",
-            ),
-            [], [],
-        )
-
-    details = client.product_details(hit.product_id)
-    sales = client.latest_sales(hit.product_id, limit=sales_limit)
-    listings = client.listings(hit.product_id, limit=listings_limit)
-
-    # Batch-fetch market prices for all English SKUs of this product
-    # (one request covers Normal NM, Foil NM, and all condition tiers).
     market_by_sku: dict[int, MarketPrice] = {}
     if details is not None and details.skus:
         sku_ids = [s.sku_id for s in details.skus if s.language == "English"]
@@ -246,18 +226,100 @@ def enrich(
         section=entry.section,
         quantity=entry.quantity,
         card_name=entry.card_name,
-        product_id=hit.product_id,
-        matched_name=hit.product_name,
-        # Prefer ProductDetails-derived metadata when available; autocomplete
-        # sometimes returns an empty set_name even when product-id is valid.
-        set_name=(details.set_name if details and details.set_name else hit.set_name),
+        product_id=product_id,
+        matched_name=details.product_name if details else fallback_name,
+        set_name=(details.set_name if details and details.set_name else fallback_set),
         set_code=details.set_code if details else None,
         collector_number=details.collector_number if details else None,
         rarity=details.rarity_name if details else None,
+        release_date=fallback_release_date,
         image_url=details.image_url if details else None,
         variants=variants,
     )
     return row, sales, listings
+
+
+def enrich(
+    client: TCGplayerClient,
+    entry: DeckEntry,
+    product_line: str | None,
+    listings_limit: int,
+    sales_limit: int,
+) -> list[tuple[DeckRow, list, list]]:
+    """Resolve a decklist entry to one or more DeckRow results.
+
+    A single-set card yields one result. A reprinted card yields multiple
+    results — one per set it appeared in, ordered newest release first.
+    """
+    # Step 1: autocomplete to disambiguate. Unambiguous (one hit) cards
+    # take the fast path; reprint aggregates (filtered out at the client
+    # layer as duplicate=true) leave `hits` empty and fall through to
+    # search_products.
+    try:
+        hits = client.autocomplete(entry.card_name)
+    except TCGplayerError as e:
+        return [(
+            DeckRow(
+                entry.section, entry.quantity, entry.card_name,
+                None, None, None,
+                missing_reason=f"autocomplete failed: {e}",
+            ),
+            [], [],
+        )]
+
+    hit = pick_best_hit(hits, entry.card_name, product_line)
+
+    if hit is not None:
+        # Unambiguous single-product case. Keep the existing fast path.
+        return [_fetch_one_product(
+            client, entry, hit.product_id,
+            fallback_name=hit.product_name,
+            fallback_set=hit.set_name,
+            fallback_release_date=None,
+            listings_limit=listings_limit,
+            sales_limit=sales_limit,
+        )]
+
+    # Step 2: autocomplete did not resolve — likely a reprint aggregate.
+    # Fall back to the search API to enumerate every set the card appears
+    # in.
+    try:
+        candidates = client.search_products(entry.card_name, product_line=product_line)
+    except TCGplayerError as e:
+        return [(
+            DeckRow(
+                entry.section, entry.quantity, entry.card_name,
+                None, None, None,
+                missing_reason=f"search failed: {e}",
+            ),
+            [], [],
+        )]
+
+    if not candidates:
+        return [(
+            DeckRow(
+                entry.section, entry.quantity, entry.card_name,
+                None, None, None,
+                missing_reason="no match",
+            ),
+            [], [],
+        )]
+
+    # Order newest release first — matches the user's "復刻比較便宜"
+    # reading pattern: the first row is the most recent reprint.
+    candidates.sort(key=lambda c: c.release_date or "", reverse=True)
+
+    return [
+        _fetch_one_product(
+            client, entry, c.product_id,
+            fallback_name=c.product_name,
+            fallback_set=c.set_name,
+            fallback_release_date=c.release_date,
+            listings_limit=listings_limit,
+            sales_limit=sales_limit,
+        )
+        for c in candidates
+    ]
 
 
 def _fmt(v: float | None) -> str:
@@ -270,6 +332,7 @@ def print_tsv(rows: list[DeckRow], variants_filter: set[str] | None = None) -> N
     headers = [
         "section", "qty", "card_name", "matched_name",
         "set_name", "set_code", "number", "rarity",
+        "released",             # ISO date; used for sorting reprints new->old
         "product_id", "sku_id",
         "printing", "condition",
         "market_price",         # per-variant (Foil has its own!)
@@ -279,6 +342,10 @@ def print_tsv(rows: list[DeckRow], variants_filter: set[str] | None = None) -> N
         "image_url",
         "missing",
     ]
+    def _release(r: DeckRow) -> str:
+        # Keep just the YYYY-MM-DD portion so the cell is short and sorts cleanly.
+        return (r.release_date or "")[:10]
+
     print("\t".join(headers))
     for r in rows:
         if not r.variants:
@@ -286,6 +353,7 @@ def print_tsv(rows: list[DeckRow], variants_filter: set[str] | None = None) -> N
                 r.section, str(r.quantity), r.card_name,
                 r.matched_name or "",
                 r.set_name or "", r.set_code or "", r.collector_number or "", r.rarity or "",
+                _release(r),
                 str(r.product_id or ""), "",
                 "", "",
                 "", "",
@@ -302,6 +370,7 @@ def print_tsv(rows: list[DeckRow], variants_filter: set[str] | None = None) -> N
                 r.section, str(r.quantity), r.card_name,
                 r.matched_name or "",
                 r.set_name or "", r.set_code or "", r.collector_number or "", r.rarity or "",
+                _release(r),
                 str(r.product_id or ""), str(v.sku_id or ""),
                 v.printing, v.condition,
                 _fmt(v.market_price),
@@ -432,19 +501,20 @@ def main(argv: list[str] | None = None) -> int:
                 task_id,
                 description=f"[cyan]{entry.quantity}x[/cyan] {entry.card_name}",
             )
-            row, sales, listings = enrich(
+            results = enrich(
                 client, entry, args.product_line,
                 listings_limit=args.listings, sales_limit=args.sales,
             )
-            rows.append(row)
-
-            if not args.no_parquet and row.product_id is not None:
-                snap_rows = snapshot_to_rows(
-                    product_id=row.product_id,
-                    card_name=row.matched_name or row.card_name,
-                    sales=sales, listings=listings, market_prices=[],
-                )
-                append_snapshot(snap_rows)
+            # Reprinted cards produce one (row, sales, listings) per set.
+            for row, sales, listings in results:
+                rows.append(row)
+                if not args.no_parquet and row.product_id is not None:
+                    snap_rows = snapshot_to_rows(
+                        product_id=row.product_id,
+                        card_name=row.matched_name or row.card_name,
+                        sales=sales, listings=listings, market_prices=[],
+                    )
+                    append_snapshot(snap_rows)
 
             progress.advance(task_id)
             if i < len(entries):
