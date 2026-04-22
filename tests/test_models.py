@@ -1,7 +1,14 @@
 import json
 from pathlib import Path
 
-from tcg.models import AutocompleteHit, Listing, MarketPrice, ProductDetails, Sale
+from tcg.models import (
+    AutocompleteHit,
+    Listing,
+    MarketPrice,
+    ProductDetails,
+    ProductSearchResult,
+    Sale,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -161,3 +168,31 @@ def test_product_details_parses_skus():
     assert foil_nm is not None
     assert foil_nm.sku_id == 8847725
     assert d.find_sku("Foil", "Damaged") is None  # not in list
+
+
+def test_product_search_result_parses_typical_payload():
+    r = ProductSearchResult.from_api({
+        "productId": 665290,
+        "productName": "Lost Providence",
+        "setName": "Phantom Monarchs",
+        "rarityName": "Ultra Rare",
+        "marketPrice": 144.64,
+        "productLineName": "Grand Archive TCG",
+        "customAttributes": {
+            "releaseDate": "2025-12-05T00:00:00Z",
+            "number": "013",
+        },
+        "formattedAttributes": {"Number": "013"},
+    })
+    assert r.product_id == 665290
+    assert r.set_name == "Phantom Monarchs"
+    assert r.market_price == 144.64
+    assert r.release_date == "2025-12-05T00:00:00Z"
+    assert r.collector_number == "013"
+
+
+def test_product_search_result_tolerates_missing_attributes():
+    r = ProductSearchResult.from_api({"productId": 1, "productName": "X", "setName": "Y"})
+    assert r.release_date is None
+    assert r.collector_number is None
+    assert r.market_price is None

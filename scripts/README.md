@@ -22,20 +22,23 @@ decklist text
 list[DeckEntry]
     │
     │ for each entry (separated by --sleep seconds):
-    │   client.autocomplete()       locate productId
-    │   client.product_details()    fetch metadata and SKU list
-    │   client.latest_sales()       fetch recent sales
-    │   client.listings()           fetch active listings
-    │   client.market_price([sku])  fetch per-variant market prices
+    │   client.autocomplete()             locate productId
+    │     └─ if ambiguous (reprint aggregate):
+    │        client.search_products()     enumerate every set → N products
+    │   for each resolved product:
+    │     client.product_details()        fetch metadata and SKU list
+    │     client.latest_sales()           fetch recent sales
+    │     client.listings()               fetch active listings
+    │     client.market_price([sku])      fetch per-variant market prices
     ▼
-DeckRow (with variants: list[VariantStats])
+list[DeckRow]  (one DeckRow per resolved product; reprints produce multiple)
     │
     │ build_variants():
     │   group listings/sales by (printing, condition)
     │   merge per-SKU market prices
     ▼
     ├──> stdout (TSV)
-    ├──> stderr (progress + reference totals)
+    ├──> stderr (Rich progress bar + missing-card panel)
     ├──> data/snapshots.parquet    (suppressed with --no-parquet)
     └──> JSON file                 (if --json was given)
 ```
@@ -65,12 +68,13 @@ endpoint returns multiple candidates:
 
 ### Output Columns
 
-Twenty-two columns per row, one row per `(card × printing × condition)`
-tuple:
+Twenty-three columns per row, one row per
+`(card × printing × condition × reprint set)` tuple:
 
 ```
 section          qty              card_name         matched_name
 set_name         set_code         number            rarity
+released
 product_id       sku_id
 printing         condition
 market_price     mp_sample        most_recent_sale  sale_avg
@@ -84,6 +88,8 @@ Column notes:
 - **`set_code`** is TCGplayer's short set identifier (e.g. `DTR1E`, `PTM`).
 - **`number`** is the collector number within the set (e.g. `004`, `013`).
   Useful when distinguishing reprints that share a name but not a number.
+- **`released`** is the set's release date (ISO `YYYY-MM-DD`). Populated on
+  reprint-expanded rows; empty for cards resolved through autocomplete.
 - **`market_price`** is fetched per-SKU. Normal and Foil rows carry
   independent values.
 - **`mp_sample`** is the number of historical sales underlying the market

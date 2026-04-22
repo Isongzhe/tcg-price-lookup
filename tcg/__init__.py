@@ -1,5 +1,13 @@
 from tcg.client import TCGplayerClient
-from tcg.models import AutocompleteHit, Listing, MarketPrice, ProductDetails, Sale, Sku
+from tcg.models import (
+    AutocompleteHit,
+    Listing,
+    MarketPrice,
+    ProductDetails,
+    ProductSearchResult,
+    Sale,
+    Sku,
+)
 
 __all__ = [
     "TCGplayerClient",
@@ -7,6 +15,7 @@ __all__ = [
     "Listing",
     "MarketPrice",
     "ProductDetails",
+    "ProductSearchResult",
     "Sale",
     "Sku",
 ]

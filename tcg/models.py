@@ -84,6 +84,40 @@ class Listing:
 
 
 @dataclass(frozen=True, slots=True)
+class ProductSearchResult:
+    """A single row from /v1/search/request. Used to enumerate every
+    product sharing a card name (reprints across different sets).
+
+    Lighter than ProductDetails: no SKU list, no per-variant market
+    prices. Callers that need SKU-level data follow up with
+    product_details(product_id).
+    """
+    product_id: int
+    product_name: str
+    set_name: str
+    rarity_name: str | None
+    market_price: float | None          # product-level (Normal NM)
+    release_date: str | None            # ISO-8601 from customAttributes.releaseDate
+    collector_number: str | None        # customAttributes.number, e.g. "013"
+    product_line_name: str | None
+
+    @classmethod
+    def from_api(cls, d: dict[str, Any]) -> ProductSearchResult:
+        custom = d.get("customAttributes") or {}
+        formatted = d.get("formattedAttributes") or {}
+        return cls(
+            product_id=int(d.get("productId") or 0),
+            product_name=d.get("productName", ""),
+            set_name=d.get("setName", ""),
+            rarity_name=d.get("rarityName"),
+            market_price=_opt_float(d.get("marketPrice")),
+            release_date=custom.get("releaseDate"),
+            collector_number=str(formatted.get("Number") or custom.get("number") or "") or None,
+            product_line_name=d.get("productLineName"),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class Sku:
     """一個 SKU = (product × printing × condition × language)。
     market_price 要靠這個 id 去 pricepoints 端點查。"""

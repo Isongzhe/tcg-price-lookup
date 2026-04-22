@@ -159,6 +159,80 @@ def test_autocomplete_drops_null_product_id_hits(client):
     assert all(h.product_id is not None for h in hits)
 
 
+def test_search_products_returns_all_reprints(client):
+    """search_products enumerates every product sharing a card name —
+    the mechanism behind reprint expansion."""
+    c, fake = client
+    payload = {
+        "errors": [],
+        "results": [{
+            "totalResults": 2,
+            "results": [
+                {
+                    "productId": 688306,
+                    "productName": "Lost Providence",
+                    "setName": "Radiant Origins",
+                    "rarityName": "Ultra Rare",
+                    "marketPrice": 45.49,
+                    "productLineName": "Grand Archive TCG",
+                    "customAttributes": {"releaseDate": "2026-04-03T00:00:00Z", "number": "409"},
+                },
+                {
+                    "productId": 665290,
+                    "productName": "Lost Providence",
+                    "setName": "Phantom Monarchs",
+                    "rarityName": "Ultra Rare",
+                    "marketPrice": 144.64,
+                    "productLineName": "Grand Archive TCG",
+                    "customAttributes": {"releaseDate": "2025-12-05T00:00:00Z", "number": "013"},
+                },
+            ],
+        }],
+    }
+    fake.set("mp-search-api.tcgplayer.com/v1/search/request", FakeResponse(200, payload))
+
+    results = c.search_products("Lost Providence", product_line="Grand Archive TCG")
+
+    assert len(results) == 2
+    assert {r.product_id for r in results} == {688306, 665290}
+    # Caller is responsible for sorting; verify raw data is intact.
+    rdo = next(r for r in results if r.product_id == 688306)
+    assert rdo.market_price == 45.49
+    assert rdo.release_date == "2026-04-03T00:00:00Z"
+
+
+def test_search_products_filters_fuzzy_name_mismatches(client):
+    """TCGplayer's search can leak fuzzy matches into the result set even
+    with useFuzzySearch=False. The client applies an exact-name filter
+    to avoid polluting reprint expansion with unrelated products."""
+    c, fake = client
+    payload = {
+        "errors": [],
+        "results": [{
+            "totalResults": 2,
+            "results": [
+                {"productId": 1, "productName": "Lost Providence", "setName": "A"},
+                {"productId": 2, "productName": "Lost Providence Token", "setName": "B"},
+            ],
+        }],
+    }
+    fake.set("mp-search-api.tcgplayer.com/v1/search/request", FakeResponse(200, payload))
+
+    results = c.search_products("Lost Providence")
+
+    assert len(results) == 1
+    assert results[0].product_id == 1
+
+
+def test_search_products_returns_empty_on_no_hits(client):
+    c, fake = client
+    payload = {"errors": [], "results": [{"totalResults": 0, "results": []}]}
+    fake.set("mp-search-api.tcgplayer.com/v1/search/request", FakeResponse(200, payload))
+
+    results = c.search_products("Nonexistent Card")
+    assert results == []
+
+
 def test_error_raises_after_retry(client):
     c, fake = client
 
