@@ -1,0 +1,47 @@
+{
+    "products": [
+        {
+            "duplicate": false,
+            "set-url-name": "Distorted Reflections",
+            "highlight": "<em>Alice,</em> <em>Golden</em> Queen",
+            "product-name": "Alice, Golden Queen",
+            "product-url-name": "Alice Golden Queen",
+            "product-line-url-name": "Grand Archive",
+            "score": 3.139879,
+            "product-line-name": "Grand Archive TCG",
+            "product-id": 644912,
+            "set-name": "Distorted Reflections"
+        },
+        {
+            "duplicate": false,
+            "set-url-name": "SP01 Seaside Memories",
+            "highlight": "<em>Alice,</em> <em>Golden</em> Afternoon",
+            "product-name": "Alice, Golden Afternoon",
+            "product-url-name": "Alice Golden Afternoon",
+            "product-line-url-name": "Shadowverse Evolve",
+            "score": 2.8692317,
+            "product-line-name": "Shadowverse: Evolve",
+            "product-id": 659811,
+            "set-name": "SP01: Seaside Memories"
+        },
+        {
+            "duplicate": false,
+            "set-url-name": "Distorted Reflections",
+            "highlight": "<em>Alice,</em> <em>Golden</em> Queen (CSR)",
+            "product-name": "Alice, Golden Queen (CSR)",
+            "product-url-name": "Alice Golden Queen CSR",
+            "product-line-url-name": "Grand Archive",
+            "score": 2.2552724,
+            "product-line-name": "Grand Archive TCG",
+            "product-id": 644885,
+            "set-name": "Distorted Reflections"
+        }
+    ],
+    "sets": [],
+    "product-lines": [
+        {"product-line-name": "Shadowverse: Evolve", "product-line-url-name": "Shadowverse Evolve", "count": 1},
+        {"product-line-name": "Grand Archive TCG", "product-line-url-name": "Grand Archive", "count": 2}
+    ],
+    "result-id": "a2d383162-a2ef-4737-9e76-121cbeffa053",
+    "algorithm": "0faf"
+}
