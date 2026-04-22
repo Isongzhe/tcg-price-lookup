@@ -90,14 +90,34 @@ Column notes:
   Useful when distinguishing reprints that share a name but not a number.
 - **`released`** is the set's release date (ISO `YYYY-MM-DD`). Populated on
   reprint-expanded rows; empty for cards resolved through autocomplete.
-- **`market_price`** is fetched per-SKU. Normal and Foil rows carry
-  independent values.
-- **`mp_sample`** is the number of historical sales underlying the market
-  price. Values below three should be treated as indicative only.
+- **`market_price`** is per-SKU, aggregated by TCGplayer over roughly
+  the last 30 days of sales. Normal and Foil rows carry independent
+  values. Not real-time.
+- **`mp_sample`** is how many sales underlie `market_price`. High values
+  (≈15+) indicate a reliable price; values ≤ 3 mean the price is a
+  near-singleton — treat as indicative only.
+- **`most_recent_sale`** has no time bound. For illiquid cards it may be
+  weeks or months old; always read it alongside `sale_count`.
+- **`sale_avg` / `sale_count`** cover the fetched window (`--sales`,
+  default 25). The time span is driven by liquidity, not a date filter.
+- **`listing_*`** is a live snapshot of active listings at run time, not
+  historical. Capped by `--listings` (default 20).
 - **`image_url`** is a 200 px CDN URL. Wrap with `=IMAGE()` in Google
   Sheets to render thumbnails.
 - **`missing`** contains a reason string when the card could not be resolved
   or an API call failed; it is empty otherwise.
+
+#### Data freshness in one line
+
+| Column | Timeframe |
+|---|---|
+| `market_price` / `mp_sample` | ~30 day rolling aggregate |
+| `most_recent_sale` | Single newest sale (no age limit) |
+| `sale_avg` / `sale_count` | Up to `--sales` most recent sales |
+| `listing_*` | Live snapshot at run time |
+
+The CLI never caches — every invocation re-fetches. Cross-run history is
+opt-in via the `history` extras.
 
 ### Default Filtering
 

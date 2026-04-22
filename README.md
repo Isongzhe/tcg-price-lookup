@@ -214,13 +214,26 @@ missing
 | `set_name`, `set_code`, `number` | Set information. `set_code` is TCGplayer's short identifier (e.g. `DTR1E`, `PTM`); `number` is the collector number within the set (e.g. `004`). |
 | `released` | ISO date of the set's release (e.g. `2026-04-03`). Populated for reprint-expanded rows; empty for cards resolved via autocomplete. Use for sorting reprints newest-first or oldest-first. |
 | `rarity` | Rarity classification (e.g. `Super Rare`, `Ultra Rare`). |
-| `market_price` | TCGplayer's authoritative per-SKU Market Price. Normal and Foil variants carry distinct values. |
-| `mp_sample` | Number of historical sales underlying Market Price. Values below three should be treated as indicative only. |
-| `most_recent_sale` | Most recent actual sale by order date, per variant. |
-| `sale_avg`, `sale_count` | Mean and count of recent sales within the fetched window. |
-| `listing_min`, `listing_avg`, `listing_count` | Statistics over currently active listings. |
+| `market_price` | TCGplayer's aggregated per-SKU Market Price, computed from recent actual sales (roughly the last month, by TCGplayer's algorithm). Normal and Foil variants carry distinct values. Not real-time — can lag intra-day. |
+| `mp_sample` | Number of sales TCGplayer used to compute `market_price`. High values (≈15+) indicate a liquid market and a reliable price; values ≤ 3 mean the price is essentially one data point and should be treated as indicative only. |
+| `most_recent_sale` | Price of the single newest sale by order date, per variant. **No time bound** — for an unpopular card this may be weeks or months old. Cross-reference with `sale_count` before trusting it. |
+| `sale_avg`, `sale_count` | Mean and count of recent sales fetched for this variant. Total rows fetched per card is capped by `--sales` (default 25), so `sale_count` ≤ 25 per variant. The time span those sales cover depends on how actively the card trades — liquid cards may see 25 sales in a day, illiquid cards may span months. |
+| `listing_min`, `listing_avg`, `listing_count` | Statistics over listings **currently active on TCGplayer at the time of the run** — a live snapshot, not historical. Capped by `--listings` (default 20). |
 | `image_url` | TCGplayer CDN image URL (200 px wide). Paste into Google Sheets and wrap with `=IMAGE()` to render a thumbnail in the cell. |
 | `missing` | Failure reason if the card could not be resolved or a request failed. Empty for successful rows. |
+
+### Data freshness at a glance
+
+| Column | Timeframe |
+|---|---|
+| `market_price` / `mp_sample` | Aggregated sales over ~30 days (TCGplayer's algorithm) |
+| `most_recent_sale` | Single most recent sale — could be today, could be months ago |
+| `sale_avg` / `sale_count` | Up to `--sales` most recent sales; span varies by liquidity |
+| `listing_*` | Live snapshot of active listings at run time |
+
+The tool never caches results — every run fetches fresh data. Historical
+tracking across runs requires the optional `history` extras (see
+Requirements).
 
 A reference subtotal (Normal NM and Foil NM) is written to `stderr` after
 processing as a colorized table. These are informational; callers are
