@@ -109,6 +109,8 @@ class ProductDetails:
     product_id: int
     product_name: str
     set_name: str
+    set_code: str | None                # e.g. "DTR1E", "PTM"
+    collector_number: str | None        # e.g. "004", "013"
     rarity_name: str | None
     market_price: float | None          # Normal NM (product-level)
     lowest_price: float | None          # 整張卡最低（跨版本）
@@ -121,10 +123,17 @@ class ProductDetails:
 
     @classmethod
     def from_api(cls, d: dict[str, Any]) -> ProductDetails:
+        # Collector number lives in formattedAttributes.Number (primary)
+        # and customAttributes.number (fallback).
+        formatted = d.get("formattedAttributes") or {}
+        custom = d.get("customAttributes") or {}
+        collector_number = formatted.get("Number") or custom.get("number")
         return cls(
             product_id=int(d.get("productId") or 0),
             product_name=d.get("productName", ""),
             set_name=d.get("setName", ""),
+            set_code=d.get("setCode"),
+            collector_number=str(collector_number) if collector_number else None,
             rarity_name=d.get("rarityName"),
             market_price=_opt_float(d.get("marketPrice")),
             lowest_price=_opt_float(d.get("lowestPrice")),
@@ -141,6 +150,16 @@ class ProductDetails:
             if s.printing == printing and s.condition == condition and s.language == language:
                 return s
         return None
+
+    @property
+    def image_url(self) -> str:
+        """Public CDN image URL (200px wide — small, suitable for Sheets IMAGE())."""
+        return f"https://tcgplayer-cdn.tcgplayer.com/product/{self.product_id}_200w.jpg"
+
+    @property
+    def image_url_large(self) -> str:
+        """Public CDN image URL (1000x1000 — higher resolution for detailed viewing)."""
+        return f"https://tcgplayer-cdn.tcgplayer.com/product/{self.product_id}_in_1000x1000.jpg"
 
 
 @dataclass(frozen=True, slots=True)
