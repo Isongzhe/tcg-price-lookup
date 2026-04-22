@@ -31,10 +31,25 @@ from collections import defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+from rich.console import Console
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
+
 from tcg.client import TCGplayerClient, TCGplayerError
 from tcg.deck import DeckEntry, parse_decklist
 from tcg.models import AutocompleteHit, Listing, MarketPrice, ProductDetails, Sale
 from tcg.storage import append_snapshot, snapshot_to_rows
+
+# All human-facing output goes through this console (stderr). stdout is
+# reserved for the TSV so piping through pbcopy/xclip works cleanly.
+console = Console(stderr=True)
 
 _SPECIAL_SUFFIX_RE = re.compile(r"\s*\([^)]+\)\s*$")
 
@@ -87,7 +102,10 @@ class DeckRow:
     product_id: int | None
     matched_name: str | None
     set_name: str | None
+    set_code: str | None = None
+    collector_number: str | None = None
     rarity: str | None = None
+    image_url: str | None = None
     variants: list[VariantStats] = field(default_factory=list)
     missing_reason: str | None = None
 
@@ -230,8 +248,13 @@ def enrich(
         card_name=entry.card_name,
         product_id=hit.product_id,
         matched_name=hit.product_name,
-        set_name=hit.set_name,
+        # Prefer ProductDetails-derived metadata when available; autocomplete
+        # sometimes returns an empty set_name even when product-id is valid.
+        set_name=(details.set_name if details and details.set_name else hit.set_name),
+        set_code=details.set_code if details else None,
+        collector_number=details.collector_number if details else None,
         rarity=details.rarity_name if details else None,
+        image_url=details.image_url if details else None,
         variants=variants,
     )
     return row, sales, listings
@@ -245,13 +268,15 @@ def print_tsv(rows: list[DeckRow], variants_filter: set[str] | None = None) -> N
     """One row per (card × variant). Raw data only — aggregation is Sheet's job.
     variants_filter: if given, only emit rows whose printing is in the set."""
     headers = [
-        "section", "qty", "card_name", "matched_name", "set_name", "rarity",
+        "section", "qty", "card_name", "matched_name",
+        "set_name", "set_code", "number", "rarity",
         "product_id", "sku_id",
         "printing", "condition",
         "market_price",         # per-variant (Foil has its own!)
         "mp_sample",            # how many data points the market price is based on
         "most_recent_sale", "sale_avg", "sale_count",
         "listing_min", "listing_avg", "listing_count",
+        "image_url",
         "missing",
     ]
     print("\t".join(headers))
@@ -259,9 +284,14 @@ def print_tsv(rows: list[DeckRow], variants_filter: set[str] | None = None) -> N
         if not r.variants:
             print("\t".join([
                 r.section, str(r.quantity), r.card_name,
-                r.matched_name or "", r.set_name or "", r.rarity or "",
-                str(r.product_id or ""), "", "", "",
-                "", "", "", "", "0", "", "", "0",
+                r.matched_name or "",
+                r.set_name or "", r.set_code or "", r.collector_number or "", r.rarity or "",
+                str(r.product_id or ""), "",
+                "", "",
+                "", "",
+                "", "", "0",
+                "", "", "0",
+                r.image_url or "",
                 r.missing_reason or "",
             ]))
             continue
@@ -270,7 +300,8 @@ def print_tsv(rows: list[DeckRow], variants_filter: set[str] | None = None) -> N
                 continue
             print("\t".join([
                 r.section, str(r.quantity), r.card_name,
-                r.matched_name or "", r.set_name or "", r.rarity or "",
+                r.matched_name or "",
+                r.set_name or "", r.set_code or "", r.collector_number or "", r.rarity or "",
                 str(r.product_id or ""), str(v.sku_id or ""),
                 v.printing, v.condition,
                 _fmt(v.market_price),
@@ -278,16 +309,18 @@ def print_tsv(rows: list[DeckRow], variants_filter: set[str] | None = None) -> N
                 _fmt(v.most_recent_sale),
                 _fmt(v.sale_avg), str(v.sale_count),
                 _fmt(v.listing_min), _fmt(v.listing_avg), str(v.listing_count),
+                r.image_url or "",
                 "",
             ]))
 
 
 def print_summary(rows: list[DeckRow]) -> None:
     """Reference totals. Real aggregation is Sheet's job."""
+    from rich.table import Table
+
     missing = [r for r in rows if r.missing_reason]
 
     def total_for(printing: str, condition: str = "Near Mint") -> tuple[float, int]:
-        """Returns (sum, cards_with_price)."""
         total = 0.0
         n = 0
         for r in rows:
@@ -301,26 +334,46 @@ def print_summary(rows: list[DeckRow]) -> None:
     normal_total, normal_n = total_for("Normal")
     foil_total, foil_n = total_for("Foil")
 
-    print(
-        f"\n[reference] Normal NM Market Price × qty = ${normal_total:.2f} USD  "
-        f"({normal_n}/{len(rows)} cards priced)",
-        file=sys.stderr,
+    summary = Table(
+        title="Reference totals (NM Market Price × qty)",
+        title_style="bold",
+        show_header=True,
+        header_style="bold dim",
     )
+    summary.add_column("Printing", style="cyan")
+    summary.add_column("Total (USD)", justify="right", style="green")
+    summary.add_column("Cards priced", justify="right", style="dim")
+    summary.add_row("Normal", f"${normal_total:.2f}", f"{normal_n}/{len(rows)}")
     if foil_n > 0:
-        print(
-            f"[reference] Foil   NM Market Price × qty = ${foil_total:.2f} USD  "
-            f"({foil_n}/{len(rows)} cards priced)",
-            file=sys.stderr,
-        )
-    print(
-        "  ↑ 真實加總請在 Sheet 用 SUMPRODUCT/QUERY 按 printing 自己算。",
-        file=sys.stderr,
+        summary.add_row("Foil", f"${foil_total:.2f}", f"{foil_n}/{len(rows)}")
+
+    console.print()
+    console.print(summary)
+    console.print(
+        "[dim]Real aggregation lives in your spreadsheet — "
+        "use SUMPRODUCT / QUERY grouped by printing.[/dim]"
     )
 
     if missing:
-        print("\nMissing:", file=sys.stderr)
+        miss_table = Table(
+            title="Missing",
+            title_style="bold red",
+            show_header=True,
+            header_style="bold dim",
+        )
+        miss_table.add_column("Section", style="dim")
+        miss_table.add_column("Qty", justify="right")
+        miss_table.add_column("Card")
+        miss_table.add_column("Reason", style="red")
         for r in missing:
-            print(f"  - [{r.section}] {r.quantity}x {r.card_name}  ({r.missing_reason})", file=sys.stderr)
+            miss_table.add_row(
+                r.section or "",
+                str(r.quantity),
+                r.card_name,
+                r.missing_reason or "",
+            )
+        console.print()
+        console.print(miss_table)
 
 
 def read_input(source: str) -> str:
@@ -353,32 +406,54 @@ def main(argv: list[str] | None = None) -> int:
     text = read_input(args.source)
     entries = parse_decklist(text)
     if not entries:
-        print("no deck entries parsed", file=sys.stderr)
+        console.print("[red]No deck entries parsed.[/red]")
         return 1
 
-    print(f"[*] Parsed {len(entries)} entries from {args.source}", file=sys.stderr)
+    console.print(
+        f"[dim]Parsed[/dim] [bold]{len(entries)}[/bold] "
+        f"[dim]entries from[/dim] [cyan]{args.source}[/cyan]"
+    )
 
     client = TCGplayerClient()
     rows: list[DeckRow] = []
 
-    for i, entry in enumerate(entries, 1):
-        print(f"[{i}/{len(entries)}] {entry.quantity}x {entry.card_name}", file=sys.stderr)
-        row, sales, listings = enrich(
-            client, entry, args.product_line,
-            listings_limit=args.listings, sales_limit=args.sales,
-        )
-        rows.append(row)
+    progress = Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        MofNCompleteColumn(),
+        TextColumn("[dim]·[/dim]"),
+        TimeElapsedColumn(),
+        TextColumn("[dim]·[/dim]"),
+        TimeRemainingColumn(),
+        console=console,
+        transient=False,
+    )
 
-        if not args.no_parquet and row.product_id is not None:
-            snap_rows = snapshot_to_rows(
-                product_id=row.product_id,
-                card_name=row.matched_name or row.card_name,
-                sales=sales, listings=listings, market_prices=[],
+    with progress:
+        task_id = progress.add_task("[cyan]Fetching prices[/cyan]", total=len(entries))
+        for i, entry in enumerate(entries, 1):
+            progress.update(
+                task_id,
+                description=f"[cyan]{entry.quantity}x[/cyan] {entry.card_name}",
             )
-            append_snapshot(snap_rows)
+            row, sales, listings = enrich(
+                client, entry, args.product_line,
+                listings_limit=args.listings, sales_limit=args.sales,
+            )
+            rows.append(row)
 
-        if i < len(entries):
-            time.sleep(args.sleep)
+            if not args.no_parquet and row.product_id is not None:
+                snap_rows = snapshot_to_rows(
+                    product_id=row.product_id,
+                    card_name=row.matched_name or row.card_name,
+                    sales=sales, listings=listings, market_prices=[],
+                )
+                append_snapshot(snap_rows)
+
+            progress.advance(task_id)
+            if i < len(entries):
+                time.sleep(args.sleep)
 
     printings_filter: set[str] | None = None
     conditions_filter: set[str] | None = None
@@ -401,7 +476,7 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps([asdict(r) for r in rows], indent=2, ensure_ascii=False),
             encoding="utf-8",
         )
-        print(f"[+] JSON written to {args.json_out}", file=sys.stderr)
+        console.print(f"[green]JSON written to[/green] [cyan]{args.json_out}[/cyan]")
 
     return 0
 

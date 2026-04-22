@@ -8,6 +8,7 @@ dependencies = [
     "curl-cffi>=0.15.0",
     "polars>=1.0.0",
     "duckdb>=1.0.0",
+    "rich>=15.0.0",
 ]
 
 [dependency-groups]
