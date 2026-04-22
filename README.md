@@ -251,6 +251,17 @@ column `U`:
 
 The CDN images are 200 px wide, which renders well in standard row heights.
 
+### Pre-built Google Sheets template
+
+A ready-to-use template with a one-click formatter (card previews,
+currency formatting, auto-hiding of metadata columns) lives in
+[`sheets/`](./sheets/). It is a convenience layer, not part of the core
+CLI — see [`sheets/README.md`](./sheets/README.md) for the script source,
+what it does and does not do, and the authorization flow to expect.
+
+**Copy the template:**
+[→ Open in Google Drive](https://docs.google.com/spreadsheets/d/1u7r0ND0wkUTGl7k8jDayK74l2U4KIlu_WLfJCR0dgcg/copy)
+
 ### Reprints
 
 Some cards appear across multiple sets (e.g. Grand Archive reprints a card
@@ -325,6 +336,9 @@ TCG/
 │   ├── fetch.py                  Single-card lookup
 │   └── fetch_deck.py             Batch decklist lookup (primary)
 │
+├── sheets/                       Google Sheets template (see sheets/README.md)
+│   └── apps-script/              Formatter script source
+│
 └── tests/                        35 tests, no network required
     ├── fixtures/
     ├── test_client.py
@@ -348,6 +362,7 @@ Further documentation:
 
 - [`tcg/README.md`](./tcg/README.md) — module responsibilities, data model, and extension points.
 - [`scripts/README.md`](./scripts/README.md) — CLI data flow and design rationale.
+- [`sheets/README.md`](./sheets/README.md) — Google Sheets template, Apps Script source, and authorization notes.
 
 ---
 
