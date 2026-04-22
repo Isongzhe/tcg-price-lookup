@@ -123,6 +123,21 @@ Decklists can also be streamed from `stdin` by passing `-` as the filename:
 pbpaste | uv run python -m scripts.fetch_deck - --product-line "Grand Archive TCG"
 ```
 
+### Exporting from deck builders
+
+Decklists exported from common deck-building tools drop straight into the
+parser without modification. For Grand Archive TCG specifically:
+
+- **[Shout At Your Decks](https://shoutatyourdecks.com)** — open the deck,
+  choose **Export → Omnidex Export**, copy the text, and either save it to
+  `mydeck.txt` or pipe it directly through `pbpaste`. The Omnidex format
+  uses `# Section` headers and `N Card Name` lines, which is the
+  parser's native format.
+
+Other deck builders that emit the same `# Section` + `N Card Name` shape
+should also work. Unrecognized lines are ignored, so extra metadata in the
+export is harmless.
+
 ---
 
 ## Command-Line Reference
