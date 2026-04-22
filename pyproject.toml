@@ -3,12 +3,20 @@ name = "tcg"
 version = "0.1.0"
 description = "TCGplayer price scraper for Grand Archive and other TCG card pools"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 dependencies = [
     "curl-cffi>=0.15.0",
+    "rich>=15.0.0",
+]
+
+[project.optional-dependencies]
+# Historical snapshot features (appending runs to Parquet and querying them
+# with DuckDB). Preview / experimental — the CLI does not currently expose
+# a user-facing command for querying history, so most users should not
+# need this. Install with:  uv sync --extra history
+history = [
     "polars>=1.0.0",
     "duckdb>=1.0.0",
-    "rich>=15.0.0",
 ]
 
 [dependency-groups]

@@ -45,7 +45,7 @@ from rich.progress import (
 from tcg.client import TCGplayerClient, TCGplayerError
 from tcg.deck import DeckEntry, parse_decklist
 from tcg.models import AutocompleteHit, Listing, MarketPrice, ProductDetails, Sale
-from tcg.storage import append_snapshot, snapshot_to_rows
+from tcg.storage import HISTORY_AVAILABLE, append_snapshot, snapshot_to_rows
 
 # All human-facing output goes through this console (stderr). stdout is
 # reserved for the TSV so piping through pbcopy/xclip works cleanly.
@@ -451,7 +451,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("source", help="path to decklist file, or '-' for stdin")
     parser.add_argument("--product-line", default=None, help="e.g. 'Grand Archive TCG'")
     parser.add_argument("--json", dest="json_out", default=None, help="write detailed JSON to this path")
-    parser.add_argument("--no-parquet", action="store_true", help="skip appending to data/snapshots.parquet")
+    parser.add_argument(
+        "--no-parquet",
+        action="store_true",
+        help="skip appending to data/snapshots.parquet "
+             "(only relevant when the `history` optional extras are installed)",
+    )
     parser.add_argument("--sleep", type=float, default=0.8, help="seconds between cards (politeness)")
     parser.add_argument("--listings", type=int, default=20)
     parser.add_argument("--sales", type=int, default=25)
@@ -506,9 +511,14 @@ def main(argv: list[str] | None = None) -> int:
                 listings_limit=args.listings, sales_limit=args.sales,
             )
             # Reprinted cards produce one (row, sales, listings) per set.
+            # Parquet snapshot writing is opt-in: requires `history` extras
+            # AND the --no-parquet flag being off. If extras aren't installed
+            # the append is silently skipped — the core TSV workflow does
+            # not depend on it.
+            parquet_enabled = HISTORY_AVAILABLE and not args.no_parquet
             for row, sales, listings in results:
                 rows.append(row)
-                if not args.no_parquet and row.product_id is not None:
+                if parquet_enabled and row.product_id is not None:
                     snap_rows = snapshot_to_rows(
                         product_id=row.product_id,
                         card_name=row.matched_name or row.card_name,
