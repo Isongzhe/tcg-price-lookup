@@ -37,6 +37,7 @@ and expose a `from_api` classmethod for deserializing API responses.
 |---|---|---|---|
 | `AutocompleteHit` | `autocomplete` | `product_id`, `product_name`, `product_line_name`, `score` | One entry from a name search |
 | `ProductDetails` | `/v2/product/{id}/details` | `market_price`, `skus`, `rarity_name`, `set_name`, `set_code`, `collector_number`, `image_url` | Product metadata plus SKU list |
+| `ProductSearchResult` | `/v1/search/request` | `product_id`, `set_name`, `release_date`, `collector_number`, `market_price` | One row per product; used to enumerate reprints sharing a card name |
 | `Sku` | `ProductDetails.skus[]` | `sku_id`, `printing`, `condition`, `language` | One SKU = product × printing × condition × language |
 | `MarketPrice` | `/pricepoints/marketprice/skus/search` | `sku_id`, `market_price`, `price_count`, `calculated_at` | Per-SKU market statistics |
 | `Sale` | `/product/{id}/latestsales` | `purchase_price`, `order_date`, `variant`, `condition` | One historical sale |
@@ -84,12 +85,17 @@ logic.
 ```python
 client = TCGplayerClient()
 
-client.autocomplete(query, product_line=None) -> list[AutocompleteHit]
-client.product_details(product_id)            -> ProductDetails | None
-client.latest_sales(product_id, limit=25)     -> list[Sale]
-client.listings(product_id, limit=50)         -> list[Listing]
-client.market_price(sku_ids)                  -> list[MarketPrice]
+client.autocomplete(query, product_line=None)        -> list[AutocompleteHit]
+client.search_products(name, product_line=None)      -> list[ProductSearchResult]
+client.product_details(product_id)                   -> ProductDetails | None
+client.latest_sales(product_id, limit=25)            -> list[Sale]
+client.listings(product_id, limit=50)                -> list[Listing]
+client.market_price(sku_ids)                         -> list[MarketPrice]
 ```
+
+`autocomplete` is the fast path for disambiguated queries. `search_products`
+is used when autocomplete returns a reprint aggregate (same name across
+multiple sets) and the caller wants to enumerate every matching product.
 
 ### Design Notes
 

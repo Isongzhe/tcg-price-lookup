@@ -59,6 +59,10 @@ visible in the terminal regardless of how `stdout` is redirected.
 - **Card set, collector number, and image URL.** Each row carries the set
   code, collector number, and a CDN image URL suitable for Google Sheets'
   `=IMAGE()` function.
+- **Reprint expansion.** When a card name exists in multiple sets (reprints
+  with different art or collector numbers), every matching product is
+  emitted as its own row, ordered newest release first. The `released`
+  column lets spreadsheets sort or filter by set age.
 - **Historical snapshots.** Each run appends to a local Parquet file that
   can be queried with DuckDB for price-trend analysis.
 - **Polite by default.** Sequential requests with a configurable per-card
@@ -176,12 +180,13 @@ prompting). Output format is human-readable; use `fetch_deck` for analysis.
 
 ## Output Format
 
-One row per `(card × printing × condition)` tuple. Twenty-two columns,
-tab-separated:
+One row per `(card × printing × condition × reprint set)` tuple.
+Twenty-three columns, tab-separated:
 
 ```
 section          qty              card_name         matched_name
 set_name         set_code         number            rarity
+released
 product_id       sku_id
 printing         condition
 market_price     mp_sample        most_recent_sale  sale_avg
@@ -193,6 +198,7 @@ missing
 | Column | Meaning |
 |---|---|
 | `set_name`, `set_code`, `number` | Set information. `set_code` is TCGplayer's short identifier (e.g. `DTR1E`, `PTM`); `number` is the collector number within the set (e.g. `004`). |
+| `released` | ISO date of the set's release (e.g. `2026-04-03`). Populated for reprint-expanded rows; empty for cards resolved via autocomplete. Use for sorting reprints newest-first or oldest-first. |
 | `rarity` | Rarity classification (e.g. `Super Rare`, `Ultra Rare`). |
 | `market_price` | TCGplayer's authoritative per-SKU Market Price. Normal and Foil variants carry distinct values. |
 | `mp_sample` | Number of historical sales underlying Market Price. Values below three should be treated as indicative only. |
@@ -217,6 +223,15 @@ column `U`:
 ```
 
 The CDN images are 200 px wide, which renders well in standard row heights.
+
+### Reprints
+
+Some cards appear across multiple sets (e.g. Grand Archive reprints a card
+into every new release). For those, one row is produced per set, ordered
+newest release first. A common negotiation signal: the newest printing is
+usually the cheapest while older printings retain a collector premium. The
+`released`, `set_code`, and `number` columns together disambiguate which
+printing a seller is actually offering.
 
 ---
 
