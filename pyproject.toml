@@ -4,10 +4,27 @@ version = "0.1.0"
 description = "TCGplayer price scraper for Grand Archive and other TCG card pools"
 readme = "README.md"
 requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Isongzhe" }]
 dependencies = [
     "curl-cffi>=0.15.0",
     "rich>=15.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Isongzhe/tcg-price-lookup"
+Repository = "https://github.com/Isongzhe/tcg-price-lookup"
+Issues = "https://github.com/Isongzhe/tcg-price-lookup/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["tcg"]
+
+[tool.hatch.build.targets.sdist]
+include = ["tcg", "README.md", "LICENSE", "NOTICE", "DISCLAIMER.md"]
 
 [project.optional-dependencies]
 # Historical snapshot features (appending runs to Parquet and querying them

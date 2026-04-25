@@ -1,3 +1,5 @@
+__version__ = "0.1.0"
+
 from tcg.client import TCGplayerClient
 from tcg.models import (
     AutocompleteHit,
@@ -10,6 +12,7 @@ from tcg.models import (
 )
 
 __all__ = [
+    "__version__",
     "TCGplayerClient",
     "AutocompleteHit",
     "Listing",
