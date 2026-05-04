@@ -22,11 +22,44 @@ Rules:
 Do not reorder fields or columns "for clarity." Do not change a field's type
 without a MAJOR bump.
 
+## Workspace convention
+
+The repo doubles as a personal working directory. `decks/`, `prices/`,
+and `notes/` are git-ignored — each contributor keeps their own
+decklists, CLI outputs, and personal notes there alongside the source
+code. None of this ships to GitHub.
+
+The single exception is `decks/sample_deck.txt`: a small, English,
+version-controlled deck that doubles as the public Quick-Start example
+and the test fixture for `tests/test_sample_deck.py`. The `.gitignore`
+uses a negation rule (`!decks/sample_deck.txt`) to track this one file
+while ignoring everything else under `decks/`.
+
+## Module placement
+
+`tcg/` is the library — reusable code with no CLI/UX assumptions. Anything
+a downstream integrator (duckdb pipeline, Discord bot, FastAPI service)
+might `import` belongs here.
+
+`scripts/` holds CLI behaviour — argparse parsing, interactive prompts,
+and OS side-effects. Anything that exists *because the CLI exists* lives
+here, including private helpers prefixed with `_` (e.g. `_clipboard.py`,
+`_config.py`).
+
+Litmus test: **"Would a library integrator ever import this?"** If no, it
+belongs in `scripts/`.
+
 ## Public API surface
 
 Everything listed in `tcg/__init__.py::__all__` is public contract.
 Everything else is internal. When adding new public symbols, add them to
 `__all__` intentionally and document the stability promise.
+
+**Decklist orchestration**: `tcg/decklist.py` exposes `DeckRow`, `VariantStats`,
+and `print_tsv` (via `tcg/output.py`) as part of the public stability contract.
+`enrich(...)` and `build_variants(...)` are importable from `tcg.decklist` but
+are not in `__all__` — they may evolve faster than the 1.0.0 contract permits
+for `__all__` symbols.
 
 ## Product lines (`tcg/product_lines.py`)
 
@@ -47,6 +80,8 @@ Storage tests skip automatically when `[history]` extras are absent.
 ## Run commands
 
 ```bash
+uv run ruff check . && uv run ruff format --check .   # lint + format check
+
 # Install
 uv sync
 
@@ -62,6 +97,31 @@ uv run python -m scripts.fetch_deck --list-product-lines
 # Smoke test (no network needed)
 uv run pytest -q
 ```
+
+## Docstring style
+
+Public API symbols (everything in `tcg.__init__.__all__`) use Google-style
+docstrings: first-line imperative summary, then `Args:`, `Returns:`,
+`Raises:`, `Example:` sections as applicable. Internal helpers can use a
+one-line summary or no docstring.
+
+## Browser fingerprint
+
+`tcg/_fingerprint.py` builds request headers matching the host OS so
+Linux/Windows users don't ship macOS-claiming requests. The Chrome
+version is the single source of truth — bump `_CHROME_VERSION` in
+`tcg/client.py` to update both the curl_cffi impersonate target and
+every header that carries a Chrome major.
+
+## Endpoints catalog
+
+`tcg/endpoints.py` is the single source of truth for the TCGplayer URLs
+this library calls. `client.py` references entries from `endpoints.ALL`
+rather than hardcoding URLs in method bodies. To inspect:
+
+    uv run python -m scripts.fetch_deck --list-endpoints
+
+When TCGplayer rolls a new search-API build, bump `endpoints.MPFEV`.
 
 ## Don'ts
 

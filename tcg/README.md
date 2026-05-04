@@ -4,7 +4,7 @@ Business logic for interacting with TCGplayer's frontend endpoints. This
 package has no CLI dependencies and is safe to import from any consumer:
 
 ```python
-from tcg import TCGplayerClient, ProductDetails, Sku
+from tcg import TCGplayerClient, ProductDetails, Sku, PRODUCT_LINES, to_slug
 ```
 
 ---
@@ -15,13 +15,19 @@ from tcg import TCGplayerClient, ProductDetails, Sku
 |---|---|---|
 | `__init__.py` | Public API surface | All submodules |
 | `models.py` | Data classes and API JSON deserialization | stdlib only |
-| `client.py` | HTTP client wrapping five TCGplayer endpoints | `curl_cffi`, `models` |
+| `product_lines.py` | Canonical TCGplayer product-line catalog — display name → URL slug | stdlib only |
+| `endpoints.py` | TCGplayer endpoint catalog (URL + method + purpose, single source of truth) | stdlib only |
+| `client.py` | HTTP client wrapping five TCGplayer endpoints | `curl_cffi`, `models`, `product_lines`, `endpoints` |
 | `deck.py` | Text-format decklist parser | stdlib (`re`) |
+| `decklist.py` | Decklist orchestration — `DeckRow`, `VariantStats`, `build_variants`, `enrich` | `models`, `client`, `deck` |
+| `output.py` | TSV serializer — `print_tsv` public serializer | `models`, `decklist` |
+| `_fingerprint.py` | Host-OS-aware request headers (internal; not in `__all__`) | stdlib only |
 | `storage.py` | Parquet writer and DuckDB query helper | `polars`, `duckdb`, `models` |
 
-**Dependency direction:** `models` is the base layer. `client`, `deck`, and
-`storage` each depend on `models` but not on each other. Any one of them can
-be replaced without affecting the others.
+**Dependency direction:** `models` is the base layer. `client` uses
+`product_lines` for slug lookup; `decklist` and `output` layer on top of
+`client` and `models`. `storage` is an optional extra. Any one layer can be
+replaced without affecting the others.
 
 ---
 
@@ -74,6 +80,40 @@ price for a specific printing and condition, the caller must:
 
 ---
 
+## `endpoints.py`
+
+Single source of truth for every URL this library calls. Each entry is an
+`Endpoint` frozen dataclass with `name`, `method`, `url`, `purpose`, and
+`auth` fields.
+
+### Public API
+
+```python
+from tcg import endpoints
+
+endpoints.ALL           # tuple of all 7 Endpoint instances
+endpoints.SEARCH        # the POST search endpoint
+endpoints.MPFEV         # "5061" — bump when TCGplayer rolls a new build
+```
+
+### Catalog
+
+| Name | Method | Purpose |
+|---|---|---|
+| `homepage` | GET | Warm-up: prime Cloudflare session cookies |
+| `autocomplete` | GET | Card-name suggestions |
+| `search` | POST | Product search + aggregations |
+| `product_details` | GET | Full product metadata + SKU list |
+| `latest_sales` | POST | N most recent completed sales |
+| `listings` | POST | Active marketplace listings |
+| `market_price` | POST | Per-SKU rolling 30-day Market Price |
+
+Three endpoints (`product_details`, `latest_sales`, `listings`) have
+`{product_id}` placeholders in their URL; substitute with
+`endpoint.url.format(product_id=...)` at call time.
+
+---
+
 ## `client.py`
 
 Wraps five TCGplayer endpoints behind a single `TCGplayerClient` class with
@@ -108,8 +148,10 @@ single GET to the homepage to prime session cookies. A guard flag
 (`_warmed_up`) ensures this happens at most once per client.
 
 **TLS fingerprint emulation.** Every outbound request specifies
-`impersonate="chrome120"` so that `curl-impersonate` constructs a TLS
-ClientHello matching Chrome 120.
+`impersonate="chrome146"` so that `curl-impersonate` constructs a TLS
+ClientHello matching Chrome 146. The Chrome major is the single source of
+truth — bump `_CHROME_VERSION` in `client.py` to update both the impersonate
+target and every header that carries a Chrome version string.
 
 **Session identifier.** A random UUID (`self.session_id`) is generated at
 construction time and reused across autocomplete requests. The target
@@ -133,6 +175,41 @@ surface as `TCGplayerError`.
 
 `TCGplayerError` is raised for non-2xx responses after retry. Consumers
 should catch it and either skip the affected card or abort the batch.
+
+---
+
+## `product_lines.py`
+
+Canonical mapping of TCGplayer product-line display names to their URL slugs.
+
+### Why it exists
+
+TCGplayer's URL slugs diverge from display names in non-obvious ways —
+Disney Lorcana → `"lorcana-tcg"`, Magic: The Gathering → `"magic"`, Dragon
+Ball Super: Masters → `"dragon-ball-super-masters"`. A hand-rolled heuristic
+(`lower().replace(" tcg", "")` etc.) produces wrong slugs for roughly 23 of
+68 product lines. This module is the canonical, verified mapping.
+
+### Public API
+
+```python
+from tcg import PRODUCT_LINES, to_slug
+from tcg.product_lines import suggest
+
+slug = to_slug("Disney Lorcana")   # -> "lorcana-tcg", or None if unknown
+candidates = suggest("lorcana")    # -> ["Disney Lorcana"]  ("did you mean?")
+```
+
+- **`PRODUCT_LINES`** — `dict[str, str]` of 68 entries, display name → slug.
+  Snapshot dated 2026-05-04.
+- **`to_slug(display_name)`** — returns the slug for an exact display-name
+  match, or `None` if the name is not in the catalog.
+- **`suggest(query)`** — returns close-match display names for "did you mean"
+  feedback when a user-supplied product-line name is unrecognized.
+
+To regenerate after TCGplayer adds or renames product lines, run
+`scripts/refresh_product_lines.py`. Do not edit `tcg/product_lines.py` by
+hand.
 
 ---
 
@@ -224,21 +301,45 @@ df = query("""
 
 ## Public API (`__init__.py`)
 
-Exported symbols:
+Exported symbols (matches `__all__` exactly):
 
 ```python
 from tcg import (
     TCGplayerClient,
-    AutocompleteHit, ProductDetails, Sku,
+    TCGplayerError,
+    AutocompleteHit, ProductDetails, ProductSearchResult, Sku,
     MarketPrice, Sale, Listing,
+    PRODUCT_LINES, to_slug,
+    DeckRow, VariantStats,
+    print_tsv,
+    Endpoint, endpoints,
 )
 ```
+
+| Name | Kind | Description |
+|---|---|---|
+| `TCGplayerClient` | class | HTTP client |
+| `TCGplayerError` | exception | All client errors |
+| `AutocompleteHit` | dataclass | Raw autocomplete match |
+| `Listing` | dataclass | One active listing |
+| `MarketPrice` | dataclass | Market price for a SKU |
+| `ProductDetails` | dataclass | Full product + SKU data |
+| `ProductSearchResult` | dataclass | One result from `search_products` |
+| `Sale` | dataclass | One recent sale record |
+| `Sku` | dataclass | Per-printing/condition SKU |
+| `PRODUCT_LINES` | dict | Display name → URL slug mapping (68 entries) |
+| `to_slug` | function | Convert a product-line display name to its URL slug |
+| `DeckRow` | dataclass | One resolved card row (output of `enrich`) |
+| `VariantStats` | dataclass | Per-variant price summary (printing × condition) |
+| `print_tsv` | function | Serialize a list of `DeckRow` to TSV |
+| `Endpoint` | dataclass | Endpoint metadata (name, method, URL, purpose) |
+| `endpoints` | module | Endpoint catalog (`endpoints.ALL`, `endpoints.SEARCH`, etc.) |
 
 The following symbols are considered internal and subject to change without
 notice:
 
-- `TCGplayerError`
 - `TCGplayerClient._request()`, `TCGplayerClient._warm_up()`
+- `tcg._fingerprint` (entire module)
 - `storage.SNAPSHOT_PATH`, `storage._SCHEMA`
 
 ---
@@ -249,8 +350,10 @@ notice:
 |---|---|
 | New API endpoint | `client.py` (add method) + `models.py` (add dataclass) |
 | New decklist syntax | `deck.py` (extend regex) |
+| New TSV column | `decklist.py` (`DeckRow`, `VariantStats`) + `output.py` (`print_tsv`) |
 | Additional historical columns | `storage.py` (`_SCHEMA` and `snapshot_to_rows`) |
 | New CLI flag | `scripts/fetch_deck.py` — do not modify `tcg/` |
+| Refresh product-line catalog | `scripts/refresh_product_lines.py` (auto-generated; do not edit `tcg/product_lines.py` by hand) |
 
 The guiding principle is that `tcg/` contains pure logic and data, while
 presentation and argument parsing live in `scripts/`.

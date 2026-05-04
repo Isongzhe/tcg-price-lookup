@@ -2,146 +2,71 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-green.svg)](./LICENSE)
-[![Tests](https://img.shields.io/badge/tests-86%20passing-brightgreen.svg)](./tests)
+[![Tests](https://img.shields.io/badge/tests-177%20passing-brightgreen.svg)](./tests)
 
-TCGplayer price-lookup library and CLI. Resolves card names to TCGplayer
-products, fetches per-variant Market Price, recent sales, and active
-listings. Returns typed dataclasses — no storage opinions, no I/O side
-effects. A CLI consumer (`scripts/fetch_deck.py`) emits TSV to stdout and
-auto-copies to clipboard.
+TCGplayer batch price lookup. Paste a deck → get a tab-separated price sheet → drop it into Google Sheets.
 
 ---
 
-## Install
+## What it does
 
-```bash
-uv add tcg-price-lookup
-# or
-pip install tcg-price-lookup
-```
-
-Optional extras for local parquet snapshots (demonstration only — see
-[Storage](#storage--persistence)):
-
-```bash
-uv add "tcg-price-lookup[history]"
-```
+You have a card list. You want to know what each card costs on TCGplayer right now. Feed the deck file in, get a TSV out — the TSV is printed to your terminal and automatically copied to your clipboard. Paste it into the included Google Sheets template for a styled, image-rich table. No API key needed.
 
 ---
 
-## Use as a Library
+## Quick start
 
-The library is the primary integration surface. Import from `tcg`:
-
-```python
-from tcg import TCGplayerClient, PRODUCT_LINES, to_slug
-
-client = TCGplayerClient()
-
-# Search for products matching a name, filtered by product line
-results = client.search_products("Alice, Golden Queen", product_line="Grand Archive TCG")
-for r in results:
-    print(r.product_id, r.set_name, r.market_price, r.release_date)
+```bash
+git clone https://github.com/Isongzhe/tcg-price-lookup.git
+cd tcg-price-lookup
+uv sync
+uv run python -m scripts.fetch_deck decks/sample_deck.txt
 ```
 
-Fetch full details and sales for a known product ID:
+TSV is printed to your terminal AND copied to your clipboard. Paste it into a Google Sheet.
 
-```python
-from tcg import TCGplayerClient, ProductDetails
+---
 
-client = TCGplayerClient()
+## Sample output
 
-# Detailed pricing per SKU (printing × condition)
-details: ProductDetails = client.product_details(12345)
-for sku in details.skus:
-    print(sku.printing, sku.condition, sku.market_price)
-
-# Recent sales
-sales = client.latest_sales(12345)
-for s in sales:
-    print(s.price, s.order_date)
+```
+section         qty  card_name              matched_name           set_name              set_code  number  rarity      released    product_id  sku_id   printing  condition  market_price  mp_sample  most_recent_sale  sale_avg  sale_count  listing_min  listing_avg  listing_count  image_url  missing
+Material Deck   1    Alice, Golden Queen    Alice, Golden Queen    Distorted Reflections  DTR1E     004     Super Rare              644912      8847720  Normal    Near Mint  3.95          25         4.99              4.53      5           2.54         3.95         6              https://…
+Material Deck   1    Alice, Golden Queen    Alice, Golden Queen    Distorted Reflections  DTR1E     004     Super Rare              644912      8847725  Foil      Near Mint  40.99         5                                        0           39.70        40.17        4              https://…
+Material Deck   1    Lost Providence        Lost Providence        Radiant Origins        RDO       409     Ultra Rare  2026-04-03  688306      9230342  Normal    Near Mint  43.07         25         42.50             42.76     5           42.50        49.05        19             https://…
+Material Deck   1    Lost Providence        Lost Providence        Phantom Monarchs       PTM       013     Ultra Rare  2025-12-05  665290      9028922  Normal    Near Mint  143.58        25         142.86            137.31    5           122.04       142.72       6              https://…
+Main Deck       3    Golden Checkmate       Golden Checkmate       Radiant Origins        RDO       85      Ultra Rare              688297      9230292  Normal    Near Mint  24.63         25         20.00             24.24     5           21.67        26.73        20             https://…
+Sideboard       2    Surging Obstruction    Surging Obstruction    Radiant Origins        RDO       247     Uncommon                688033      9227901  Normal    Near Mint  0.68          5          0.64              0.64      4           0.48         0.70         20             https://…
 ```
 
-All exported types are dataclasses. The fields and TSV column order are
-stable within a MAJOR version — see [Stability](#stability).
+One row per card × printing × condition × reprint set. The full 23-column schema is documented in [`scripts/README.md`](./scripts/README.md).
 
-### Full public API
+---
 
-Everything in `tcg.__all__` is a stable public contract:
+## Defaults you might want to change
 
-| Name | Kind | Description |
+| Setting | Default | How to change |
 |---|---|---|
-| `TCGplayerClient` | class | HTTP client |
-| `TCGplayerError` | exception | All client errors |
-| `ProductDetails` | dataclass | Full product + SKU data |
-| `ProductSearchResult` | dataclass | One result from `search_products` |
-| `AutocompleteHit` | dataclass | Raw autocomplete match |
-| `Sku` | dataclass | Per-printing/condition SKU |
-| `MarketPrice` | dataclass | Market price for a SKU |
-| `Sale` | dataclass | One recent sale record |
-| `Listing` | dataclass | One active listing |
-| `PRODUCT_LINES` | dict | Display name → URL slug mapping (68 entries) |
-| `to_slug` | function | Convert a product-line display name to its URL slug |
-
----
-
-## Use as a CLI
-
-```bash
-uv run python -m scripts.fetch_deck deck.txt
-```
-
-Deck file format — one card per line, optional `# Section` headers:
-
-```
-# Material Deck
-1 Alice, Golden Queen
-
-# Main Deck
-4 Lorraine, Wandering Warrior
-3 Diana, Keeper of Tradition
-```
-
-TSV is written to stdout **and** automatically copied to the clipboard on
-macOS, Linux (wl-copy/xclip/xsel), and Windows (clip). Use `--no-copy` to
-suppress.
-
-List all 68 known product lines:
-
-```bash
-uv run python -m scripts.fetch_deck --list-product-lines
-```
-
-### CLI flags
-
-| Flag | Default | Description |
-|---|---|---|
-| `source` | (required) | Decklist file path, or `-` for stdin |
-| `--product-line` | config/env | TCGplayer product line name |
-| `--list-product-lines` | — | Print all known product lines and exit |
-| `--printings` | `Normal,Foil` | Comma-separated printing names |
-| `--conditions` | `Near Mint` | Comma-separated condition tiers |
-| `--parquet` | off (opt-in) | Append results to `data/snapshots.parquet` |
-| `--no-copy` | — | Suppress clipboard write |
-| `--config PATH` | — | Path to a TOML config file |
+| Product line filter | (none — searches all TCGs) | `product_line = "Grand Archive TCG"` in config or `--product-line` flag |
+| Auto-copy to clipboard | on | `copy_to_clipboard = false` in config or `--no-copy` flag |
+| Save TSV to a file | (none — only stdout/clipboard) | `output_path = "prices/last_run.tsv"` in config or `--output PATH` flag |
+| Printings shown | `Normal,Foil` | `--printings all` for every printing, or comma-separated list |
+| Conditions shown | `Near Mint` | `--conditions all`, or comma-separated list |
+| Save snapshot to parquet | off | `--parquet` flag (requires `[history]` extras) |
 
 ---
 
 ## Configuration
 
-Create `~/.config/tcg/config.toml` for user-wide defaults, or `./tcg.toml`
-for project-local settings:
+Set defaults once and every run picks them up:
 
 ```toml
-# ~/.config/tcg/config.toml  (or ./tcg.toml for project-local)
+# ~/.config/tcg/config.toml — set once, applies to every run
 product_line = "Grand Archive TCG"
-printings = ["Normal", "Foil"]
-conditions = ["Near Mint"]
-copy_to_clipboard = true
-write_parquet = false
+output_path = "prices/last_run.tsv"
 ```
 
-All keys can also be set via environment variables:
+All settings are also available as environment variables:
 
 | Env var | Config key |
 |---|---|
@@ -150,98 +75,49 @@ All keys can also be set via environment variables:
 | `TCG_CONDITIONS` | `conditions` |
 | `TCG_COPY_TO_CLIPBOARD` | `copy_to_clipboard` |
 | `TCG_WRITE_PARQUET` | `write_parquet` |
+| `TCG_OUTPUT_PATH` | `output_path` |
 
-**Precedence** (highest wins): CLI flags > env vars > TOML config > built-in defaults.
-
----
-
-## Product Lines
-
-The `PRODUCT_LINES` dict contains 68 known TCGplayer product lines
-(snapshot 2026-05-04). To see them:
-
-```bash
-uv run python -m scripts.fetch_deck --list-product-lines
-```
-
-To refresh the list against the live TCGplayer API:
-
-```bash
-uv run python scripts/refresh_product_lines.py
-```
-
-Paste the printed literal into `tcg/product_lines.py`. Do not edit that
-file by hand.
+Precedence: CLI flags > env vars > TOML > built-in defaults. See [`scripts/README.md`](./scripts/README.md) for the full lookup order and CLI flag reference.
 
 ---
 
-## Output Format
+## Google Sheets template
 
-One row per `(card × printing × condition × reprint set)` tuple, TSV,
-twenty-three columns:
+The repo includes a Google Sheets template with a one-click Apps Script formatter. Run it after pasting your TSV and it transforms the raw data into a styled table: card image thumbnails in column A, a dark header bar, zebra banding, currency formatting on `market_price`, and metadata columns hidden by default (they can be re-expanded with the `[+]` toggle).
 
+Full instructions and a copy-template link are in [`sheets/README.md`](./sheets/README.md).
+
+---
+
+## Use as a library
+
+The `tcg` package is a standalone HTTP client you can import into any Python project — a duckdb pipeline, a Discord bot, a FastAPI service:
+
+```python
+from tcg import TCGplayerClient
+
+client = TCGplayerClient()
+results = client.search_products("Alice, Golden Queen", product_line="Grand Archive TCG")
+for r in results:
+    print(r.product_id, r.set_name, r.market_price, r.release_date)
 ```
-section  qty  card_name  matched_name  set_name  set_code  number  rarity
-released  product_id  sku_id  printing  condition
-market_price  mp_sample  most_recent_sale  sale_avg  sale_count
-listing_min  listing_avg  listing_count
-image_url  missing
-```
 
-TSV column order is stable within a MAJOR version — see [Stability](#stability).
-
-Wrap `image_url` values with `=IMAGE(...)` in Google Sheets to render
-card thumbnails. A ready-to-use template with a one-click formatter lives
-in [`sheets/`](./sheets/).
+Full library API documented in [`tcg/README.md`](./tcg/README.md).
 
 ---
 
 ## Stability
 
-The TSV column order (`print_tsv` in `scripts/fetch_deck.py`) and exported
-dataclass fields (`tcg/models.py`) are a **stable contract** within the 1.x
-line:
-
-- New columns and fields will be **appended only**.
-- Renames, reorders, removals, and semantic changes require a **MAJOR version bump**.
-- Every breaking change is documented in [CHANGELOG.md](./CHANGELOG.md) with the new MAJOR version.
-
----
-
-## Storage / Persistence
-
-`tcg.storage` (parquet + DuckDB) is a **demonstration** of one persistence
-approach. It is opt-in (`--parquet` flag or `write_parquet = true` in
-config) and lives in the `[history]` extras.
-
-Integrators building their own pipelines (duckdb, postgres, sqlite, etc.)
-should consume the library's dataclasses directly — the library itself has
-no storage dependencies.
-
----
-
-## Testing
-
-```bash
-uv run pytest
-```
-
-All 86 tests are offline (HTTP behavior exercised through a fake session;
-recorded API responses stored under `tests/fixtures/`). Storage tests are
-skipped automatically when the `[history]` extras are not installed.
+TSV columns and dataclass fields are stable within MAJOR: new columns and fields will be appended only. Renames, reorders, removals, and semantic changes require a MAJOR version bump and are documented in [CHANGELOG.md](./CHANGELOG.md).
 
 ---
 
 ## License
 
-Licensed under the **Apache License, Version 2.0** — see [`LICENSE`](./LICENSE)
-and [`NOTICE`](./NOTICE).
+Licensed under the **Apache License, Version 2.0** — see [`LICENSE`](./LICENSE) and [`NOTICE`](./NOTICE).
+
+---
 
 ## Disclaimer
 
-**Please read [`DISCLAIMER.md`](./DISCLAIMER.md) before using this
-software.** This project is not affiliated with, endorsed by, or sponsored
-by TCGplayer, Inc. "TCGplayer" and all product-line names are trademarks of
-their respective owners, used nominatively. For commercial use of TCGplayer
-data, apply for access to the
-[official TCGplayer API](https://docs.tcgplayer.com/).
+Not affiliated with TCGplayer, Inc. For commercial use of TCGplayer data, apply for the [official TCGplayer API](https://docs.tcgplayer.com/). See [DISCLAIMER.md](./DISCLAIMER.md) for full terms.
