@@ -165,29 +165,37 @@ def test_search_products_returns_all_reprints(client):
     c, fake = client
     payload = {
         "errors": [],
-        "results": [{
-            "totalResults": 2,
-            "results": [
-                {
-                    "productId": 688306,
-                    "productName": "Lost Providence",
-                    "setName": "Radiant Origins",
-                    "rarityName": "Ultra Rare",
-                    "marketPrice": 45.49,
-                    "productLineName": "Grand Archive TCG",
-                    "customAttributes": {"releaseDate": "2026-04-03T00:00:00Z", "number": "409"},
-                },
-                {
-                    "productId": 665290,
-                    "productName": "Lost Providence",
-                    "setName": "Phantom Monarchs",
-                    "rarityName": "Ultra Rare",
-                    "marketPrice": 144.64,
-                    "productLineName": "Grand Archive TCG",
-                    "customAttributes": {"releaseDate": "2025-12-05T00:00:00Z", "number": "013"},
-                },
-            ],
-        }],
+        "results": [
+            {
+                "totalResults": 2,
+                "results": [
+                    {
+                        "productId": 688306,
+                        "productName": "Lost Providence",
+                        "setName": "Radiant Origins",
+                        "rarityName": "Ultra Rare",
+                        "marketPrice": 45.49,
+                        "productLineName": "Grand Archive TCG",
+                        "customAttributes": {
+                            "releaseDate": "2026-04-03T00:00:00Z",
+                            "number": "409",
+                        },
+                    },
+                    {
+                        "productId": 665290,
+                        "productName": "Lost Providence",
+                        "setName": "Phantom Monarchs",
+                        "rarityName": "Ultra Rare",
+                        "marketPrice": 144.64,
+                        "productLineName": "Grand Archive TCG",
+                        "customAttributes": {
+                            "releaseDate": "2025-12-05T00:00:00Z",
+                            "number": "013",
+                        },
+                    },
+                ],
+            }
+        ],
     }
     fake.set("mp-search-api.tcgplayer.com/v1/search/request", FakeResponse(200, payload))
 
@@ -208,13 +216,15 @@ def test_search_products_filters_fuzzy_name_mismatches(client):
     c, fake = client
     payload = {
         "errors": [],
-        "results": [{
-            "totalResults": 2,
-            "results": [
-                {"productId": 1, "productName": "Lost Providence", "setName": "A"},
-                {"productId": 2, "productName": "Lost Providence Token", "setName": "B"},
-            ],
-        }],
+        "results": [
+            {
+                "totalResults": 2,
+                "results": [
+                    {"productId": 1, "productName": "Lost Providence", "setName": "A"},
+                    {"productId": 2, "productName": "Lost Providence Token", "setName": "B"},
+                ],
+            }
+        ],
     }
     fake.set("mp-search-api.tcgplayer.com/v1/search/request", FakeResponse(200, payload))
 
@@ -252,6 +262,7 @@ def test_error_raises_after_retry(client):
 # Regression: product-line slug lookup replaces broken heuristic
 # ---------------------------------------------------------------------------
 
+
 def _empty_search_payload():
     return {
         "errors": [],
@@ -270,7 +281,9 @@ def _get_search_json(fake_calls):
 def test_search_products_disney_lorcana_slug(client):
     """Regression: 'Disney Lorcana' must map to 'lorcana-tcg', not 'disney lorcana'."""
     c, fake = client
-    fake.set("mp-search-api.tcgplayer.com/v1/search/request", FakeResponse(200, _empty_search_payload()))
+    fake.set(
+        "mp-search-api.tcgplayer.com/v1/search/request", FakeResponse(200, _empty_search_payload())
+    )
 
     c.search_products("Some Card", product_line="Disney Lorcana")
 
@@ -281,9 +294,111 @@ def test_search_products_disney_lorcana_slug(client):
 def test_search_products_magic_slug(client):
     """Regression: 'Magic: The Gathering' must map to 'magic'."""
     c, fake = client
-    fake.set("mp-search-api.tcgplayer.com/v1/search/request", FakeResponse(200, _empty_search_payload()))
+    fake.set(
+        "mp-search-api.tcgplayer.com/v1/search/request", FakeResponse(200, _empty_search_payload())
+    )
 
     c.search_products("Some Card", product_line="Magic: The Gathering")
 
     body = _get_search_json(fake.calls)
     assert body["filters"]["term"]["productLineName"] == ["magic"]
+
+
+# ---------------------------------------------------------------------------
+# Regression: client dispatches to catalog URLs (Stage E)
+# ---------------------------------------------------------------------------
+
+
+def test_search_products_dispatches_to_catalog_url(client):
+    """search_products must POST to endpoints.SEARCH.url (not a hardcoded string)."""
+    from tcg import endpoints
+
+    c, fake = client
+    fake.set(
+        "mp-search-api.tcgplayer.com/v1/search/request", FakeResponse(200, _empty_search_payload())
+    )
+
+    c.search_products("Some Card")
+
+    search_calls = [call for call in fake.calls if "search/request" in call.get("url", "")]
+    assert search_calls, "no call to the search endpoint found"
+    assert search_calls[0]["url"] == endpoints.SEARCH.url
+
+
+def test_latest_sales_dispatches_to_catalog_url(client):
+    """latest_sales must POST to endpoints.LATEST_SALES.url with product_id substituted."""
+    from tcg import endpoints
+
+    c, fake = client
+    product_id = 12345
+    fake.set(
+        f"mpapi.tcgplayer.com/v2/product/{product_id}/latestsales",
+        FakeResponse(200, {"data": []}),
+    )
+
+    c.latest_sales(product_id)
+
+    expected_url = endpoints.LATEST_SALES.url.format(product_id=product_id)
+    sales_calls = [call for call in fake.calls if "latestsales" in call.get("url", "")]
+    assert sales_calls, "no call to the latest_sales endpoint found"
+    assert sales_calls[0]["url"] == expected_url
+
+
+def test_product_details_dispatches_to_catalog_url(client):
+    """product_details must GET endpoints.PRODUCT_DETAILS.url with product_id substituted."""
+    from tcg import endpoints
+
+    c, fake = client
+    product_id = 558637
+    fake.set(
+        f"mp-search-api.tcgplayer.com/v2/product/{product_id}/details",
+        FakeResponse(200, {"productId": product_id, "productName": "Test Card"}),
+    )
+
+    c.product_details(product_id)
+
+    expected_url = endpoints.PRODUCT_DETAILS.url.format(product_id=product_id)
+    detail_calls = [call for call in fake.calls if "/details" in call.get("url", "")]
+    assert detail_calls, "no call to the product_details endpoint found"
+    assert detail_calls[0]["url"] == expected_url
+
+
+def test_tls_fingerprint_and_user_agent_chrome_versions_match():
+    """Regression: the curl_cffi impersonate target and every Chrome
+    version surfaced in HTTP headers must agree. A mismatch (e.g.
+    chrome120 TLS handshake but Chrome 145 User-Agent) is a passive
+    Cloudflare bot signal — see the comment block above _CHROME_VERSION
+    in tcg/client.py."""
+    import re
+
+    from tcg.client import _CHROME_VERSION, _COMMON_HEADERS, _IMPERSONATE
+
+    # Impersonate target carries the Chrome major
+    assert f"chrome{_CHROME_VERSION}" == _IMPERSONATE
+
+    # User-Agent must show the same Chrome major
+    ua_match = re.search(r"Chrome/(\d+)", _COMMON_HEADERS["user-agent"])
+    assert ua_match is not None, "User-Agent missing Chrome version"
+    assert ua_match.group(1) == _CHROME_VERSION
+
+    # sec-ch-ua client hint must show the same major in both Chrome and Chromium entries
+    sec_ch_ua = _COMMON_HEADERS["sec-ch-ua"]
+    chrome_versions = re.findall(r'"(?:Google Chrome|Chromium)";v="(\d+)"', sec_ch_ua)
+    assert chrome_versions, "sec-ch-ua missing Chrome/Chromium version"
+    assert all(v == _CHROME_VERSION for v in chrome_versions), (
+        f"sec-ch-ua versions {chrome_versions} disagree with _CHROME_VERSION={_CHROME_VERSION}"
+    )
+
+
+def test_impersonate_target_is_supported_by_curl_cffi():
+    """Regression: bumping _CHROME_VERSION to a value curl_cffi doesn't
+    support would silently fall back at request time. Catch it at import."""
+    from curl_cffi.requests.impersonate import BrowserType
+
+    from tcg.client import _IMPERSONATE
+
+    available = {v.value for v in BrowserType}
+    assert _IMPERSONATE in available, (
+        f"{_IMPERSONATE} not in installed curl_cffi's BrowserType enum. "
+        f"Run `[v.value for v in BrowserType]` to see options."
+    )

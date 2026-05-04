@@ -56,7 +56,7 @@ def test_sale_parses_typical_payload():
 
 
 def test_listing_parses_typical_payload():
-    l = Listing.from_api(
+    listing = Listing.from_api(
         644912,
         {
             "price": 9.99,
@@ -69,22 +69,24 @@ def test_listing_parses_typical_payload():
             "listingId": 12345,
         },
     )
-    assert l.price == 9.99
-    assert l.quantity == 3
-    assert l.seller_name == "CardShop"
+    assert listing.price == 9.99
+    assert listing.quantity == 3
+    assert listing.seller_name == "CardShop"
 
 
 def test_product_details_parses_typical_payload():
-    d = ProductDetails.from_api({
-        "productId": 644912,
-        "productName": "Alice, Golden Queen",
-        "setName": "Distorted Reflections",
-        "rarityName": "Super Rare",
-        "marketPrice": 3.68,
-        "lowestPriceWithShipping": 4.0,
-        "sellers": 7,
-        "foilOnly": False,
-    })
+    d = ProductDetails.from_api(
+        {
+            "productId": 644912,
+            "productName": "Alice, Golden Queen",
+            "setName": "Distorted Reflections",
+            "rarityName": "Super Rare",
+            "marketPrice": 3.68,
+            "lowestPriceWithShipping": 4.0,
+            "sellers": 7,
+            "foilOnly": False,
+        }
+    )
     assert d.product_id == 644912
     assert d.market_price == 3.68
     assert d.rarity_name == "Super Rare"
@@ -106,14 +108,16 @@ def test_market_price_handles_none_values():
 
 
 def test_market_price_parses_full_payload():
-    m = MarketPrice.from_api({
-        "skuId": 8847725,
-        "marketPrice": 39.68,
-        "lowestPrice": 29.99,
-        "highestPrice": 50,
-        "priceCount": 6,
-        "calculatedAt": "2026-04-05T06:02:19.914Z",
-    })
+    m = MarketPrice.from_api(
+        {
+            "skuId": 8847725,
+            "marketPrice": 39.68,
+            "lowestPrice": 29.99,
+            "highestPrice": 50,
+            "priceCount": 6,
+            "calculatedAt": "2026-04-05T06:02:19.914Z",
+        }
+    )
     assert m.sku_id == 8847725
     assert m.market_price == 39.68
     assert m.price_count == 6
@@ -121,48 +125,66 @@ def test_market_price_parses_full_payload():
 
 
 def test_product_details_parses_set_code_and_collector_number():
-    d = ProductDetails.from_api({
-        "productId": 644912,
-        "productName": "Alice, Golden Queen",
-        "setName": "Distorted Reflections",
-        "setCode": "DTR1E",
-        "rarityName": "Super Rare",
-        "marketPrice": 3.68,
-        "formattedAttributes": {"Rarity": "Super Rare", "Number": "004"},
-        "customAttributes": {"number": "004", "element": "Norm"},
-    })
+    d = ProductDetails.from_api(
+        {
+            "productId": 644912,
+            "productName": "Alice, Golden Queen",
+            "setName": "Distorted Reflections",
+            "setCode": "DTR1E",
+            "rarityName": "Super Rare",
+            "marketPrice": 3.68,
+            "formattedAttributes": {"Rarity": "Super Rare", "Number": "004"},
+            "customAttributes": {"number": "004", "element": "Norm"},
+        }
+    )
     assert d.set_code == "DTR1E"
     assert d.collector_number == "004"
 
 
 def test_product_details_collector_number_falls_back_to_custom_attributes():
     # When formattedAttributes is absent, fall back to customAttributes.number.
-    d = ProductDetails.from_api({
-        "productId": 1,
-        "productName": "X",
-        "setName": "Y",
-        "customAttributes": {"number": "042"},
-    })
+    d = ProductDetails.from_api(
+        {
+            "productId": 1,
+            "productName": "X",
+            "setName": "Y",
+            "customAttributes": {"number": "042"},
+        }
+    )
     assert d.collector_number == "042"
 
 
 def test_product_details_image_urls_are_cdn_links():
     d = ProductDetails.from_api({"productId": 644912, "productName": "X", "setName": "Y"})
     assert d.image_url == "https://tcgplayer-cdn.tcgplayer.com/product/644912_200w.jpg"
-    assert d.image_url_large == "https://tcgplayer-cdn.tcgplayer.com/product/644912_in_1000x1000.jpg"
+    assert (
+        d.image_url_large == "https://tcgplayer-cdn.tcgplayer.com/product/644912_in_1000x1000.jpg"
+    )
 
 
 def test_product_details_parses_skus():
-    d = ProductDetails.from_api({
-        "productId": 644912,
-        "productName": "Alice, Golden Queen",
-        "setName": "DTR",
-        "marketPrice": 3.68,
-        "skus": [
-            {"sku": 8847720, "condition": "Near Mint", "variant": "Normal", "language": "English"},
-            {"sku": 8847725, "condition": "Near Mint", "variant": "Foil", "language": "English"},
-        ],
-    })
+    d = ProductDetails.from_api(
+        {
+            "productId": 644912,
+            "productName": "Alice, Golden Queen",
+            "setName": "DTR",
+            "marketPrice": 3.68,
+            "skus": [
+                {
+                    "sku": 8847720,
+                    "condition": "Near Mint",
+                    "variant": "Normal",
+                    "language": "English",
+                },
+                {
+                    "sku": 8847725,
+                    "condition": "Near Mint",
+                    "variant": "Foil",
+                    "language": "English",
+                },
+            ],
+        }
+    )
     assert len(d.skus) == 2
     foil_nm = d.find_sku("Foil", "Near Mint")
     assert foil_nm is not None
@@ -171,19 +193,21 @@ def test_product_details_parses_skus():
 
 
 def test_product_search_result_parses_typical_payload():
-    r = ProductSearchResult.from_api({
-        "productId": 665290,
-        "productName": "Lost Providence",
-        "setName": "Phantom Monarchs",
-        "rarityName": "Ultra Rare",
-        "marketPrice": 144.64,
-        "productLineName": "Grand Archive TCG",
-        "customAttributes": {
-            "releaseDate": "2025-12-05T00:00:00Z",
-            "number": "013",
-        },
-        "formattedAttributes": {"Number": "013"},
-    })
+    r = ProductSearchResult.from_api(
+        {
+            "productId": 665290,
+            "productName": "Lost Providence",
+            "setName": "Phantom Monarchs",
+            "rarityName": "Ultra Rare",
+            "marketPrice": 144.64,
+            "productLineName": "Grand Archive TCG",
+            "customAttributes": {
+                "releaseDate": "2025-12-05T00:00:00Z",
+                "number": "013",
+            },
+            "formattedAttributes": {"Number": "013"},
+        }
+    )
     assert r.product_id == 665290
     assert r.set_name == "Phantom Monarchs"
     assert r.market_price == 144.64

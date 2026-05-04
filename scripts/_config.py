@@ -1,4 +1,6 @@
-"""Config system for the TCGplayer price-lookup CLI.
+"""CLI-internal config loader for scripts/.
+
+Loads CLI flag defaults from TOML and TCG_* environment variables.
 
 Priority order (highest to lowest):
   1. CLI overrides (dict passed by the caller)
@@ -9,6 +11,9 @@ Priority order (highest to lowest):
 Search order for TOML when config_path is None:
   1. ./tcg.toml  (project-local)
   2. ~/.config/tcg/config.toml  (user-global)
+
+This module is private to the CLI (leading-underscore name). It is NOT part
+of the public tcg library API and should not be imported from outside scripts/.
 """
 
 from __future__ import annotations
@@ -18,7 +23,6 @@ import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -30,6 +34,7 @@ _DEFAULTS: dict[str, Any] = {
     "conditions": ["Near Mint"],
     "copy_to_clipboard": True,
     "write_parquet": False,
+    "output_path": None,
 }
 
 _KNOWN_KEYS = frozenset(_DEFAULTS.keys())
@@ -41,6 +46,7 @@ _ENV_MAP = {
     "TCG_CONDITIONS": "conditions",
     "TCG_COPY_TO_CLIPBOARD": "copy_to_clipboard",
     "TCG_WRITE_PARQUET": "write_parquet",
+    "TCG_OUTPUT_PATH": "output_path",
 }
 
 
@@ -58,6 +64,7 @@ class Config:
     conditions: list[str]
     copy_to_clipboard: bool
     write_parquet: bool
+    output_path: Path | None
 
 
 # ---------------------------------------------------------------------------
@@ -76,13 +83,16 @@ def _parse_bool(value: str) -> bool:
         return True
     if v in ("0", "false", "no"):
         return False
-    raise ValueError(
-        f"Cannot parse {value!r} as a boolean. Use 1/0, true/false, or yes/no."
-    )
+    raise ValueError(f"Cannot parse {value!r} as a boolean. Use 1/0, true/false, or yes/no.")
 
 
 def _parse_comma_list(value: str) -> list[str]:
     return [s.strip() for s in value.split(",") if s.strip()]
+
+
+def _parse_path(value: str) -> Path:
+    """Parse a string path, expanding ~ to the home directory."""
+    return Path(value).expanduser()
 
 
 def _load_toml(path: Path) -> dict[str, Any]:
@@ -95,9 +105,7 @@ def _load_toml(path: Path) -> dict[str, Any]:
         with path.open("rb") as fh:
             raw = tomllib.load(fh)
     except tomllib.TOMLDecodeError as exc:
-        raise ValueError(
-            f"Could not parse config file {path}: {exc}"
-        ) from exc
+        raise ValueError(f"Could not parse config file {path}: {exc}") from exc
 
     for key in raw:
         if key not in _KNOWN_KEYS:
@@ -158,7 +166,10 @@ def load_config(
         raw_toml = _load_toml(toml_path)
         for key in _KNOWN_KEYS:
             if key in raw_toml:
-                merged[key] = raw_toml[key]
+                val = raw_toml[key]
+                if key == "output_path" and isinstance(val, str):
+                    val = _parse_path(val)
+                merged[key] = val
 
     # --- 4. Apply env var overrides ---
     for env_key, field_name in _ENV_MAP.items():
@@ -169,6 +180,8 @@ def load_config(
             merged[field_name] = _parse_bool(raw_val)
         elif field_name in ("printings", "conditions"):
             merged[field_name] = _parse_comma_list(raw_val)
+        elif field_name == "output_path":
+            merged[field_name] = _parse_path(raw_val)
         else:
             merged[field_name] = raw_val
 
@@ -177,10 +190,16 @@ def load_config(
         if value is not None and key in _KNOWN_KEYS:
             merged[key] = value
 
+    # Normalise output_path: if it's still a string (shouldn't be, but be safe), convert it
+    raw_output_path = merged.get("output_path")
+    if isinstance(raw_output_path, str):
+        raw_output_path = _parse_path(raw_output_path)
+
     return Config(
         product_line=merged["product_line"],
         printings=list(merged["printings"]),
         conditions=list(merged["conditions"]),
         copy_to_clipboard=bool(merged["copy_to_clipboard"]),
         write_parquet=bool(merged["write_parquet"]),
+        output_path=raw_output_path,
     )

@@ -13,13 +13,15 @@ missing.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from collections.abc import Iterable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterable, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 try:
     import duckdb
     import polars as pl
+
     HISTORY_AVAILABLE = True
 except ImportError:  # pragma: no cover
     duckdb = None  # type: ignore[assignment]
@@ -27,13 +29,14 @@ except ImportError:  # pragma: no cover
     HISTORY_AVAILABLE = False
 
 if TYPE_CHECKING:
-    import polars as pl  # noqa: F811  (for type hints only)
+    import polars as pl
 
 from tcg.models import Listing, MarketPrice, Sale
 
 
 class HistoryUnavailable(RuntimeError):
     """Raised when storage functions are called without the `history` extras."""
+
     def __init__(self) -> None:
         super().__init__(
             "Historical snapshot features require the `history` extras. "
@@ -102,7 +105,7 @@ def snapshot_to_rows(
     market_prices: Iterable[MarketPrice],
     fetched_at: datetime | None = None,
 ) -> list[dict]:
-    fetched_at = fetched_at or datetime.now(timezone.utc)
+    fetched_at = fetched_at or datetime.now(UTC)
     rows: list[dict] = []
 
     for s in sales:
@@ -119,17 +122,17 @@ def snapshot_to_rows(
         )
         rows.append(row)
 
-    for l in listings:
+    for listing in listings:
         row = _row_base(product_id, card_name, fetched_at)
         row.update(
             source="listing",
-            price=l.price,
-            shipping_price=l.shipping_price,
-            quantity=l.quantity,
-            condition=l.condition,
-            printing=l.printing,
-            language=l.language,
-            seller_name=l.seller_name,
+            price=listing.price,
+            shipping_price=listing.shipping_price,
+            quantity=listing.quantity,
+            condition=listing.condition,
+            printing=listing.printing,
+            language=listing.language,
+            seller_name=listing.seller_name,
         )
         rows.append(row)
 
@@ -172,13 +175,11 @@ def query(sql: str, path: Path = SNAPSHOT_PATH):
     _require_history()
     con = duckdb.connect()
     if path.exists():
-        con.execute(
-            f"CREATE VIEW snapshots AS SELECT * FROM read_parquet('{path}')"
-        )
+        con.execute(f"CREATE VIEW snapshots AS SELECT * FROM read_parquet('{path}')")
     rel = con.execute(sql)
     columns = [d[0] for d in rel.description]
     data = rel.fetchall()
     if not data:
         return pl.DataFrame({c: [] for c in columns})
-    rows = [dict(zip(columns, row)) for row in data]
+    rows = [dict(zip(columns, row, strict=False)) for row in data]
     return pl.DataFrame(rows)

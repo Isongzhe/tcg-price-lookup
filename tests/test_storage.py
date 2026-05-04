@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -13,7 +13,7 @@ from tcg.storage import append_snapshot, query, snapshot_to_rows
 
 
 def test_snapshot_to_rows_tags_source():
-    ts = datetime(2026, 4, 22, tzinfo=timezone.utc)
+    ts = datetime(2026, 4, 22, tzinfo=UTC)
     rows = snapshot_to_rows(
         product_id=644912,
         card_name="Alice, Golden Queen",
@@ -28,7 +28,7 @@ def test_snapshot_to_rows_tags_source():
 
 
 def test_append_snapshot_roundtrip(tmp_path: Path):
-    ts = datetime(2026, 4, 22, tzinfo=timezone.utc)
+    ts = datetime(2026, 4, 22, tzinfo=UTC)
     rows = snapshot_to_rows(
         product_id=644912,
         card_name="Alice, Golden Queen",
@@ -47,7 +47,7 @@ def test_append_snapshot_roundtrip(tmp_path: Path):
 
 
 def test_append_snapshot_appends(tmp_path: Path):
-    ts = datetime(2026, 4, 22, tzinfo=timezone.utc)
+    ts = datetime(2026, 4, 22, tzinfo=UTC)
     path = tmp_path / "snaps.parquet"
 
     for price in (10.0, 11.0):
@@ -66,7 +66,7 @@ def test_append_snapshot_appends(tmp_path: Path):
 
 
 def test_duckdb_query(tmp_path: Path):
-    ts = datetime(2026, 4, 22, tzinfo=timezone.utc)
+    ts = datetime(2026, 4, 22, tzinfo=UTC)
     rows = snapshot_to_rows(
         product_id=644912,
         card_name="X",

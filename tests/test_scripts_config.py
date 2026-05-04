@@ -1,4 +1,4 @@
-"""Tests for tcg.config — Config dataclass and load_config() loader.
+"""Tests for scripts._config — Config dataclass and load_config() loader.
 
 Priority order: CLI overrides > env vars > TOML file > hardcoded defaults.
 """
@@ -10,8 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from tcg.config import Config, load_config
-
+from scripts._config import load_config
 
 # ---------------------------------------------------------------------------
 # Defaults
@@ -182,3 +181,45 @@ def test_config_is_frozen():
     cfg = load_config({}, config_path=None, env={})
     with pytest.raises((AttributeError, TypeError)):
         cfg.product_line = "Oops"  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# output_path field
+# ---------------------------------------------------------------------------
+
+
+def test_output_path_from_toml(tmp_path: Path):
+    toml_file = tmp_path / "tcg.toml"
+    toml_file.write_text('output_path = "/tmp/foo.tsv"\n', encoding="utf-8")
+    cfg = load_config({}, config_path=toml_file, env={})
+    assert cfg.output_path == Path("/tmp/foo.tsv")
+
+
+def test_output_path_expands_tilde(tmp_path: Path):
+    toml_file = tmp_path / "tcg.toml"
+    toml_file.write_text('output_path = "~/foo.tsv"\n', encoding="utf-8")
+    cfg = load_config({}, config_path=toml_file, env={})
+    assert cfg.output_path == Path("~/foo.tsv").expanduser()
+
+
+def test_output_path_env_override(tmp_path: Path):
+    toml_file = tmp_path / "tcg.toml"
+    toml_file.write_text('output_path = "/tmp/foo.tsv"\n', encoding="utf-8")
+    cfg = load_config({}, config_path=toml_file, env={"TCG_OUTPUT_PATH": "/tmp/bar.tsv"})
+    assert cfg.output_path == Path("/tmp/bar.tsv")
+
+
+def test_output_path_cli_override(tmp_path: Path):
+    toml_file = tmp_path / "tcg.toml"
+    toml_file.write_text('output_path = "/tmp/foo.tsv"\n', encoding="utf-8")
+    cfg = load_config(
+        {"output_path": Path("/tmp/cli.tsv")},
+        config_path=toml_file,
+        env={"TCG_OUTPUT_PATH": "/tmp/bar.tsv"},
+    )
+    assert cfg.output_path == Path("/tmp/cli.tsv")
+
+
+def test_output_path_none_when_unset():
+    cfg = load_config({}, config_path=None, env={})
+    assert cfg.output_path is None

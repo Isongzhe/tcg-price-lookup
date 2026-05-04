@@ -15,11 +15,14 @@ data/
 *.parquet
 .DS_Store
 
-# Personal notes — not for public repo
+# Personal workspace — local-only working directories
+# `decks/sample_deck.txt` is the public sample (tracked); everything else
+# under decks/ is personal and ignored.
+decks/*
+!decks/sample_deck.txt
+prices/
+notes/
+
+# Stale Chinese personal notes (kept locally, not for public repo)
 google_sheet.md
 summary.md
-mydeck.txt
-example.txt
-
-# POC
-main.py

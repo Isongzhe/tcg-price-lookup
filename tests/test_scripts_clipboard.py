@@ -1,14 +1,11 @@
-"""Tests for tcg.clipboard — platform-aware clipboard detection and writing."""
+"""Tests for scripts._clipboard — platform-aware clipboard detection and writing."""
 
 from __future__ import annotations
 
 import subprocess
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-from tcg.clipboard import detect_clipboard_cmd, write_to_clipboard
-
+from scripts._clipboard import detect_clipboard_cmd, write_to_clipboard
 
 # ---------------------------------------------------------------------------
 # detect_clipboard_cmd — platform dispatch
