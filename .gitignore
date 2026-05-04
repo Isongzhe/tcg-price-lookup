@@ -24,6 +24,10 @@ prices/*
 !prices/sample_deck.tsv
 notes/
 
+# CLI configuration — copy tcg.toml.example to tcg.toml and edit.
+# tcg.toml is your local settings; the .example template is tracked.
+tcg.toml
+
 # Maintainer guide — kept locally, not for public repo
 CLAUDE.md
 

@@ -1,0 +1,50 @@
+# tcg.toml — CLI defaults.
+#
+# Copy this file to `tcg.toml` (gitignored) and edit to taste. Each
+# section below documents one setting; the last line of each section
+# is the commented-out setting itself. To enable a setting, remove
+# the leading `#` on that line.
+#
+# CLI flags and TCG_* environment variables override this file.
+
+# ── product_line ──────────────────────────────────────────────
+# Restrict every search to one TCGplayer product line.
+# Default: None (no filter; searches all TCGs).
+# Run `uv run python -m scripts.fetch_deck --list-product-lines`
+# for the full list of valid display names.
+#
+# product_line = "Grand Archive TCG"
+
+# ── printings ─────────────────────────────────────────────────
+# Printings to include in the TSV output.
+# Default: ["Normal", "Foil"].
+# Accepts any printing name TCGplayer reports. To show every
+# printing, use the `--printings all` CLI flag instead of this list.
+#
+# printings = ["Normal", "Foil"]
+
+# ── conditions ────────────────────────────────────────────────
+# Card conditions to include in the TSV output.
+# Default: ["Near Mint"].
+#
+# conditions = ["Near Mint"]
+
+# ── copy_to_clipboard ─────────────────────────────────────────
+# Auto-copy TSV to system clipboard.
+# Default: true (silent no-op on systems without a clipboard tool).
+#
+# copy_to_clipboard = true
+
+# ── output_path ───────────────────────────────────────────────
+# Also write the TSV to this file (in addition to stdout/clipboard).
+# Tilde (~) is expanded; parent directories are auto-created.
+# Default: unset (no file written).
+#
+# output_path = "prices/last_run.tsv"
+
+# ── request_interval ──────────────────────────────────────────
+# Seconds to sleep between cards. Lower = faster total runtime;
+# higher = safer against TCGplayer rate limiting.
+# Default: 0.8.
+#
+# request_interval = 0.8
