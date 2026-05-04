@@ -63,11 +63,76 @@ def _clipboard_paste_hint() -> str:
         return "paste with Ctrl+V (or middle-click)"
 
 
+def _render_rich_preview(rows: list[DeckRow], console: Console) -> None:
+    """Render a 7-column Rich Table preview to the given console.
+
+    Used for the terminal-attached path; the full 23-column TSV still
+    goes to clipboard and (optionally) the output file.
+
+    Missing cards (where missing_reason is set) appear as red rows with
+    the reason in the market_price column so they're visible to the
+    reader. Cards with no resolved variants render as a single row with
+    blank price columns.
+    """
+    from rich.table import Table
+
+    table = Table(show_lines=False, box=None, padding=(0, 1))
+    table.add_column("Section", style="dim")
+    table.add_column("Qty", justify="right", style="dim")
+    table.add_column("Card", style="bold")
+    table.add_column("Set")
+    table.add_column("Printing", style="cyan")
+    table.add_column("Condition", style="dim")
+    table.add_column("Price", justify="right")
+
+    for r in rows:
+        if r.missing_reason:
+            table.add_row(
+                r.section or "",
+                str(r.quantity),
+                r.card_name,
+                "[red]—[/red]",
+                "[red]—[/red]",
+                "[red]—[/red]",
+                f"[red]{r.missing_reason}[/red]",
+            )
+            continue
+        if not r.variants:
+            table.add_row(
+                r.section or "",
+                str(r.quantity),
+                r.card_name,
+                r.set_name or "",
+                "—",
+                "—",
+                "—",
+            )
+            continue
+        for i, v in enumerate(r.variants):
+            section_cell = (r.section or "") if i == 0 else ""
+            qty_cell = str(r.quantity) if i == 0 else ""
+            name_cell = r.card_name if i == 0 else ""
+            set_cell = (r.set_name or "") if i == 0 else ""
+            price = f"${v.market_price:.2f}" if v.market_price is not None else "—"
+            table.add_row(
+                section_cell,
+                qty_cell,
+                name_cell,
+                set_cell,
+                v.printing,
+                v.condition,
+                price,
+            )
+
+    console.print(table)
+
+
 def print_summary(
     rows: list[DeckRow],
     clipboard_copied: bool,
     no_copy: bool = False,
     output_path: Path | None = None,
+    tty_mode: bool = False,
 ) -> None:
     """Post-run UX: loud banner for missing cards, one-line status count,
     and a clear summary of where the TSV was written."""
@@ -110,7 +175,12 @@ def print_summary(
     # --- Output destinations summary ---
     console.print()
     console.print("[bold]Output destinations:[/bold]")
-    console.print("  [green]✓[/green] stdout (printed above)")
+    if tty_mode:
+        console.print(
+            "  [green]✓[/green] stdout (preview shown above; full TSV is on your clipboard)"
+        )
+    else:
+        console.print("  [green]✓[/green] stdout (printed above)")
 
     if clipboard_copied:
         hint = _clipboard_paste_hint()
@@ -330,11 +400,15 @@ def main(argv: list[str] | None = None) -> int:
     print_tsv(rows, variants_filter=printings_filter, file=tsv_buf)
     tsv_text = tsv_buf.getvalue()
 
-    # Print TSV to stdout
-    sys.stdout.write(tsv_text)
-    sys.stdout.flush()
+    # Route stdout based on whether it is connected to a terminal.
+    tty_mode = sys.stdout.isatty()
+    if tty_mode:
+        _render_rich_preview(rows, Console())
+    else:
+        sys.stdout.write(tsv_text)
+        sys.stdout.flush()
 
-    # Auto-clipboard
+    # Auto-clipboard — always full TSV regardless of TTY mode.
     clipboard_copied = False
     if config.copy_to_clipboard and not args.no_copy:
         clipboard_copied = write_to_clipboard(tsv_text)
@@ -359,6 +433,7 @@ def main(argv: list[str] | None = None) -> int:
         clipboard_copied=clipboard_copied,
         no_copy=args.no_copy,
         output_path=written_output_path,
+        tty_mode=tty_mode,
     )
 
     return 0
