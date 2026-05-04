@@ -119,8 +119,8 @@ class ProductSearchResult:
 
 @dataclass(frozen=True, slots=True)
 class Sku:
-    """一個 SKU = (product × printing × condition × language)。
-    market_price 要靠這個 id 去 pricepoints 端點查。"""
+    """One SKU = (product × printing × condition × language).
+    Use the sku_id to query the pricepoints endpoint for market_price."""
     sku_id: int
     printing: str        # "Normal" / "Foil"
     condition: str       # "Near Mint" / ...
@@ -147,7 +147,7 @@ class ProductDetails:
     collector_number: str | None        # e.g. "004", "013"
     rarity_name: str | None
     market_price: float | None          # Normal NM (product-level)
-    lowest_price: float | None          # 整張卡最低（跨版本）
+    lowest_price: float | None          # lowest across all variants of this product
     median_price: float | None
     lowest_price_with_shipping: float | None
     sellers: int | None

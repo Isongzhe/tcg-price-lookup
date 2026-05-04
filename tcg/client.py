@@ -14,6 +14,7 @@ from tcg.models import (
     ProductSearchResult,
     Sale,
 )
+from tcg.product_lines import to_slug
 
 _IMPERSONATE = "chrome120"
 
@@ -88,7 +89,7 @@ class TCGplayerClient:
         *,
         product_line: str | None = None,
     ) -> list[AutocompleteHit]:
-        """卡名搜尋。product_line: 若給定（例如 'Grand Archive TCG'）會在本地過濾。"""
+        """Search by card name. If product_line is given (e.g. 'Grand Archive TCG'), filter results locally."""
         data = self._request(
             "GET",
             "https://data.tcgplayer.com/autocomplete",
@@ -130,10 +131,11 @@ class TCGplayerClient:
         """
         filters_term: dict[str, list[str]] = {"productName": [card_name]}
         if product_line:
-            # The search API expects the lowercase URL-like form
-            # ("grand archive", "magic", "pokemon"). Translate common
-            # display names to that form.
-            filters_term["productLineName"] = [product_line.lower().replace(" tcg", "").strip()]
+            # Use the canonical slug lookup. Fall back to the lowercased input
+            # for unknown product lines — TCGplayer's substring filter may still
+            # match even if the name is not in our catalog.
+            slug = to_slug(product_line) or product_line.strip().lower()
+            filters_term["productLineName"] = [slug]
         payload = {
             "algorithm": "revenue_exp_v2_1",
             "from": 0,

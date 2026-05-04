@@ -246,3 +246,44 @@ def test_error_raises_after_retry(client):
 
     with pytest.raises(TCGplayerError):
         c.latest_sales(644912)
+
+
+# ---------------------------------------------------------------------------
+# Regression: product-line slug lookup replaces broken heuristic
+# ---------------------------------------------------------------------------
+
+def _empty_search_payload():
+    return {
+        "errors": [],
+        "results": [{"totalResults": 0, "results": []}],
+    }
+
+
+def _get_search_json(fake_calls):
+    """Return the JSON body sent to the search endpoint."""
+    for call in fake_calls:
+        if "mp-search-api.tcgplayer.com/v1/search/request" in call.get("url", ""):
+            return call.get("json", {})
+    return {}
+
+
+def test_search_products_disney_lorcana_slug(client):
+    """Regression: 'Disney Lorcana' must map to 'lorcana-tcg', not 'disney lorcana'."""
+    c, fake = client
+    fake.set("mp-search-api.tcgplayer.com/v1/search/request", FakeResponse(200, _empty_search_payload()))
+
+    c.search_products("Some Card", product_line="Disney Lorcana")
+
+    body = _get_search_json(fake.calls)
+    assert body["filters"]["term"]["productLineName"] == ["lorcana-tcg"]
+
+
+def test_search_products_magic_slug(client):
+    """Regression: 'Magic: The Gathering' must map to 'magic'."""
+    c, fake = client
+    fake.set("mp-search-api.tcgplayer.com/v1/search/request", FakeResponse(200, _empty_search_payload()))
+
+    c.search_products("Some Card", product_line="Magic: The Gathering")
+
+    body = _get_search_json(fake.calls)
+    assert body["filters"]["term"]["productLineName"] == ["magic"]
