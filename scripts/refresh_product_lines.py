@@ -4,7 +4,10 @@ PRODUCT_LINES literal. Paste the output back into tcg/product_lines.py.
 Usage:
     uv run python -m scripts.refresh_product_lines
 """
+
 from __future__ import annotations
+
+import sys
 
 from tcg.client import TCGplayerClient
 
@@ -25,8 +28,15 @@ def main() -> int:
             "settings": {"useFuzzySearch": False, "didYouMean": {}},
         },
     )
-    aggs = data.get("aggregations") or {}
-    buckets = aggs.get("productLineName") or []
+    results = data.get("results") if isinstance(data, dict) else None
+    if not results:
+        print("# No results in response — TCGplayer may have changed the schema.", file=sys.stderr)
+        return 1
+    aggs = results[0].get("aggregations") if isinstance(results[0], dict) else None
+    buckets = (aggs or {}).get("productLineName") or []
+    if not buckets:
+        print("# productLineName aggregation is empty — schema may have changed.", file=sys.stderr)
+        return 1
     print("PRODUCT_LINES: dict[str, str] = {")
     for b in buckets:
         slug = b.get("urlValue")

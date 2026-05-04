@@ -6,6 +6,8 @@ from typing import Any
 
 from curl_cffi import requests
 
+from tcg import endpoints
+from tcg._fingerprint import build_headers
 from tcg.models import (
     AutocompleteHit,
     Listing,
@@ -16,28 +18,45 @@ from tcg.models import (
 )
 from tcg.product_lines import to_slug
 
-_IMPERSONATE = "chrome120"
-
-_COMMON_HEADERS = {
-    "accept": "application/json, text/plain, */*",
-    "accept-language": "en-US,en;q=0.9,zh-TW;q=0.8,zh;q=0.7",
-    "origin": "https://www.tcgplayer.com",
-    "referer": "https://www.tcgplayer.com/",
-    "sec-ch-ua": '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
-    "sec-ch-ua-mobile": "?0",
-    "sec-ch-ua-platform": '"macOS"',
-    "user-agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36"
-    ),
-}
+# TLS fingerprint and User-Agent must match. The Chrome major version
+# below is the single source of truth — bumping it updates both the
+# curl_cffi impersonate target and every Chrome-version-bearing header.
+#
+# To list available impersonate targets in your installed curl_cffi:
+#     from curl_cffi.requests.impersonate import BrowserType
+#     [v.value for v in BrowserType if "chrome" in v.value]
+#
+# Bump when:
+#   - curl_cffi adds support for a newer Chrome major (and the current
+#     target falls more than ~2 majors behind real Chrome), or
+#   - TCGplayer / Cloudflare starts returning 403 on the current target.
+_CHROME_VERSION = "146"
+_IMPERSONATE = f"chrome{_CHROME_VERSION}"
+_COMMON_HEADERS = build_headers(_CHROME_VERSION)
 
 
 class TCGplayerError(Exception):
-    pass
+    """Raised on any non-2xx HTTP response from a TCGplayer API endpoint."""
 
 
 class TCGplayerClient:
+    """HTTP client for the unofficial TCGplayer marketplace API.
+
+    Uses ``curl_cffi`` with Chrome TLS fingerprint impersonation to bypass
+    bot-detection. A brief warm-up request to the TCGplayer homepage is made
+    automatically before the first real API call so session cookies are
+    established.
+
+    Args:
+        warm_up_delay: Seconds to sleep after the warm-up homepage request
+            before issuing the first API call. Increase if you see 403s on
+            the first request in a new session.
+
+    Example:
+        >>> client = TCGplayerClient()  # doctest: +SKIP
+        >>> hits = client.autocomplete("Alice, Golden Queen")  # doctest: +SKIP
+    """
+
     def __init__(self, warm_up_delay: float = 1.5) -> None:
         self.session = requests.Session()
         self.session_id = str(uuid.uuid4())
@@ -48,7 +67,7 @@ class TCGplayerClient:
         if self._warmed_up:
             return
         self.session.get(
-            "https://www.tcgplayer.com/",
+            endpoints.HOMEPAGE.url,
             headers=_COMMON_HEADERS,
             impersonate=_IMPERSONATE,
         )
@@ -78,9 +97,7 @@ class TCGplayerClient:
             time.sleep(2.0)
             return self._request(method, url, params=params, json=json, retry=False)
         if resp.status_code >= 400:
-            raise TCGplayerError(
-                f"{method} {url} → {resp.status_code}: {resp.text[:200]}"
-            )
+            raise TCGplayerError(f"{method} {url} → {resp.status_code}: {resp.text[:200]}")
         return resp.json()
 
     def autocomplete(
@@ -89,10 +106,39 @@ class TCGplayerClient:
         *,
         product_line: str | None = None,
     ) -> list[AutocompleteHit]:
-        """Search by card name. If product_line is given (e.g. 'Grand Archive TCG'), filter results locally."""
+        """Return autocomplete suggestions for a partial or full card name.
+
+        Queries the TCGplayer autocomplete endpoint and filters out hits that
+        have a ``None`` product ID (pre-release or unresolved aggregates) and
+        duplicate aggregate rows. The result set is suitable for direct
+        consumption or as input to :meth:`product_details`.
+
+        Args:
+            query: Partial or full card name to search for. Matching is
+                handled server-side.
+            product_line: Optional display name (e.g. ``"Grand Archive TCG"``)
+                to restrict results to one product line. Filtering is done
+                client-side after the API response. See :data:`tcg.PRODUCT_LINES`
+                for valid values.
+
+        Returns:
+            Autocomplete hits with valid ``product_id`` values, deduplicated.
+            Ordered by the server's relevance score descending.
+
+        Raises:
+            TCGplayerError: On a non-2xx HTTP response after retry.
+
+        Example:
+            >>> client = TCGplayerClient()  # doctest: +SKIP
+            >>> hits = client.autocomplete(  # doctest: +SKIP
+            ...     "Alice", product_line="Grand Archive TCG"
+            ... )
+            >>> hits[0].product_name  # doctest: +SKIP
+            'Alice, Golden Queen'
+        """
         data = self._request(
-            "GET",
-            "https://data.tcgplayer.com/autocomplete",
+            endpoints.AUTOCOMPLETE.method,
+            endpoints.AUTOCOMPLETE.url,
             params={
                 "q": query,
                 "session-id": self.session_id,
@@ -119,15 +165,37 @@ class TCGplayerClient:
     ) -> list[ProductSearchResult]:
         """Find every product matching an exact card name.
 
-        Uses the frontend search endpoint at
-        mp-search-api.tcgplayer.com/v1/search/request. Unlike autocomplete,
-        this returns one row per product, which is how reprints surface:
-        the same card name across multiple sets will produce multiple
-        results.
+        Use this when enumerating reprints — the same card name across
+        multiple sets returns one row per set. Unlike :meth:`autocomplete`,
+        this uses the full search endpoint and never collapses reprints into
+        a single aggregate row.
 
-        Results are returned in the order TCGplayer's relevance algorithm
-        ranks them; callers that want release-date ordering should sort
-        on the `release_date` field.
+        An exact (non-fuzzy) match on ``productName`` is enforced client-side
+        even though the server sometimes returns near-matches.
+
+        Args:
+            card_name: Exact card name to search for. Matching is
+                case-insensitive.
+            product_line: Optional display name (e.g. ``"Grand Archive TCG"``)
+                to restrict results to one product line. See
+                :data:`tcg.PRODUCT_LINES` for valid values.
+            size: Maximum number of results to request from the server.
+
+        Returns:
+            Products in TCGplayer's relevance order. Sort on ``release_date``
+            for chronological order.
+
+        Raises:
+            TCGplayerError: On a non-2xx HTTP response after retry.
+
+        Example:
+            >>> client = TCGplayerClient()  # doctest: +SKIP
+            >>> results = client.search_products(  # doctest: +SKIP
+            ...     "Alice, Golden Queen",
+            ...     product_line="Grand Archive TCG",
+            ... )
+            >>> results[0].set_name  # doctest: +SKIP
+            'Distorted Reflections'
         """
         filters_term: dict[str, list[str]] = {"productName": [card_name]}
         if product_line:
@@ -146,9 +214,9 @@ class TCGplayerClient:
             "settings": {"useFuzzySearch": False, "didYouMean": {}},
         }
         data = self._request(
-            "POST",
-            "https://mp-search-api.tcgplayer.com/v1/search/request",
-            params={"mpfev": "5061"},
+            endpoints.SEARCH.method,
+            endpoints.SEARCH.url,
+            params={"mpfev": endpoints.MPFEV},
             json=payload,
         )
         if not isinstance(data, dict):
@@ -169,31 +237,101 @@ class TCGplayerClient:
         ]
 
     def product_details(self, product_id: int) -> ProductDetails | None:
-        """/v2/product/{id}/details — authoritative Market Price + metadata."""
+        """Fetch authoritative metadata and market price for a single product.
+
+        Calls ``/v2/product/{id}/details`` which returns the full SKU list,
+        Normal NM market price, lowest price across all variants, and
+        structured set / collector-number data.
+
+        Args:
+            product_id: TCGplayer numeric product ID (e.g. from an
+                :class:`~tcg.AutocompleteHit` or
+                :class:`~tcg.ProductSearchResult`).
+
+        Returns:
+            A :class:`~tcg.ProductDetails` instance, or ``None`` if the
+            endpoint returns no ``productId`` in the response body.
+
+        Raises:
+            TCGplayerError: On a non-2xx HTTP response after retry.
+
+        Example:
+            >>> client = TCGplayerClient()  # doctest: +SKIP
+            >>> details = client.product_details(558637)  # doctest: +SKIP
+            >>> details.set_name  # doctest: +SKIP
+            'Distorted Reflections'
+        """
         data = self._request(
-            "GET",
-            f"https://mp-search-api.tcgplayer.com/v2/product/{product_id}/details",
-            params={"mpfev": "5061"},
+            endpoints.PRODUCT_DETAILS.method,
+            endpoints.PRODUCT_DETAILS.url.format(product_id=product_id),
+            params={"mpfev": endpoints.MPFEV},
         )
         if not isinstance(data, dict) or not data.get("productId"):
             return None
         return ProductDetails.from_api(data)
 
     def latest_sales(self, product_id: int, limit: int = 25) -> list[Sale]:
+        """Return the most recent completed sales for a product.
+
+        Calls ``/v2/product/{id}/latestsales``. Results are ordered newest
+        first by ``order_date``. Use this for computing recent sale averages
+        and spotting price momentum.
+
+        Args:
+            product_id: TCGplayer numeric product ID.
+            limit: Maximum number of sale records to request.
+
+        Returns:
+            Sale records, newest first. May be fewer than ``limit`` if the
+            product has low sales volume.
+
+        Raises:
+            TCGplayerError: On a non-2xx HTTP response after retry.
+
+        Example:
+            >>> client = TCGplayerClient()  # doctest: +SKIP
+            >>> sales = client.latest_sales(558637, limit=10)  # doctest: +SKIP
+            >>> sales[0].purchase_price  # USD  # doctest: +SKIP
+            4.99
+        """
         data = self._request(
-            "POST",
-            f"https://mpapi.tcgplayer.com/v2/product/{product_id}/latestsales",
-            params={"mpfev": "5061"},
+            endpoints.LATEST_SALES.method,
+            endpoints.LATEST_SALES.url.format(product_id=product_id),
+            params={"mpfev": endpoints.MPFEV},
             json={"limit": limit},
         )
         raw = data.get("data", []) if isinstance(data, dict) else []
         return [Sale.from_api(product_id, s) for s in raw]
 
     def listings(self, product_id: int, limit: int = 50) -> list[Listing]:
+        """Return active marketplace listings for a product, sorted by price.
+
+        Calls ``/v1/product/{id}/listings`` sorted by ``price+shipping``
+        ascending, so the cheapest offers appear first. Use this for
+        computing current listing minimums and averages.
+
+        Args:
+            product_id: TCGplayer numeric product ID.
+            limit: Maximum number of listing records to request.
+
+        Returns:
+            Active listings ordered by price + shipping ascending. Each
+            listing corresponds to one seller's offer for a specific
+            condition and printing.
+
+        Raises:
+            TCGplayerError: On a non-2xx HTTP response after retry.
+
+        Example:
+            >>> client = TCGplayerClient()  # doctest: +SKIP
+            >>> listings = client.listings(558637, limit=20)  # doctest: +SKIP
+            >>> listings[0].price  # cheapest listing in USD  # doctest: +SKIP
+            3.50
+        """
         data = self._request(
-            "POST",
-            f"https://mp-search-api.tcgplayer.com/v1/product/{product_id}/listings",
-            params={"mpfev": "5061"},
+            endpoints.LISTINGS.method,
+            endpoints.LISTINGS.url.format(product_id=product_id),
+            params={"mpfev": endpoints.MPFEV},
             json={
                 "filters": {"term": {}, "range": {}, "exclude": {}},
                 "from": 0,
@@ -213,12 +351,37 @@ class TCGplayerClient:
         return [Listing.from_api(product_id, r) for r in raw]
 
     def market_price(self, sku_ids: list[int]) -> list[MarketPrice]:
+        """Fetch market price statistics for a batch of SKU IDs.
+
+        Calls the pricepoints endpoint in a single POST with all requested
+        SKUs. This is the most granular price source: each SKU encodes one
+        (product × printing × condition × language) combination, so Normal
+        NM and Foil NM have separate market prices.
+
+        Args:
+            sku_ids: List of TCGplayer SKU IDs to look up. An empty list
+                returns immediately with no network call.
+
+        Returns:
+            One :class:`~tcg.MarketPrice` per SKU that had data. SKUs with
+            no market data are omitted from the response. Order is not
+            guaranteed to match the input list.
+
+        Raises:
+            TCGplayerError: On a non-2xx HTTP response after retry.
+
+        Example:
+            >>> client = TCGplayerClient()  # doctest: +SKIP
+            >>> prices = client.market_price([12345678, 12345679])  # doctest: +SKIP
+            >>> prices[0].market_price  # USD  # doctest: +SKIP
+            5.25
+        """
         if not sku_ids:
             return []
         data = self._request(
-            "POST",
-            "https://mpgateway.tcgplayer.com/v1/pricepoints/marketprice/skus/search",
-            params={"mpfev": "5061"},
+            endpoints.MARKET_PRICE.method,
+            endpoints.MARKET_PRICE.url,
+            params={"mpfev": endpoints.MPFEV},
             json={"skuIds": sku_ids},
         )
         raw: list[dict] = []

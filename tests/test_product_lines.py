@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from tcg.product_lines import PRODUCT_LINES, suggest, to_slug
 
 

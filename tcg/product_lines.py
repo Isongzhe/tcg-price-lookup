@@ -4,13 +4,17 @@ Source: aggregation query on
   POST https://mp-search-api.tcgplayer.com/v1/search/request
   payload: {"aggregations": ["productLineName"], "size": 0, ...}
 
-Captured 2026-05-04. Re-run scripts/refresh_product_lines.py to refresh
-and paste the output back into PRODUCT_LINES below.
+:data:`PRODUCT_LINES` maps each display name to its URL slug. Use the slug
+when sending ``productLineName`` filters to the TCGplayer search API; pass
+the display name wherever the public API accepts a ``product_line`` argument.
 
-Mapping is display name -> URL slug. Use the slug when sending
-productLineName filters to TCGplayer's search API; the display name is
-what users type and see.
+Note:
+    This snapshot was captured on 2026-05-04 (68 entries). To refresh it,
+    run ``scripts/refresh_product_lines.py`` and paste the printed ``dict``
+    literal back into :data:`PRODUCT_LINES`. Do not edit slug values by hand
+    — they must match the TCGplayer API exactly.
 """
+
 from __future__ import annotations
 
 PRODUCT_LINES: dict[str, str] = {
@@ -85,10 +89,25 @@ PRODUCT_LINES: dict[str, str] = {
 
 
 def to_slug(display_name: str) -> str | None:
-    """Look up the URL slug for a product-line display name.
+    """Return the URL slug for a product-line display name.
 
-    Returns None if the name is not in the canonical list. Matching is
-    case-insensitive on the display name to absorb user typing variance.
+    Matching is case-insensitive to absorb common typing variance
+    (e.g. ``"grand archive tcg"`` matches ``"Grand Archive TCG"``).
+
+    Args:
+        display_name: Human-readable product line name. Should correspond to
+            a key in :data:`PRODUCT_LINES`, but unknown names return ``None``
+            rather than raising.
+
+    Returns:
+        The URL slug string (e.g. ``"grand-archive"``), or ``None`` if
+        ``display_name`` is not found in :data:`PRODUCT_LINES`.
+
+    Example:
+        >>> to_slug("Grand Archive TCG")
+        'grand-archive'
+        >>> to_slug("unknown game") is None
+        True
     """
     lowered = display_name.strip().lower()
     for name, slug in PRODUCT_LINES.items():

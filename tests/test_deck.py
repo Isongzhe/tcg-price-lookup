@@ -1,7 +1,6 @@
 from tcg.deck import parse_decklist
-from scripts.fetch_deck import build_variants, pick_best_hit
+from tcg.decklist import build_variants, pick_best_hit
 from tcg.models import AutocompleteHit, Listing, Sale
-
 
 SAMPLE = """# Material Deck
 1 Alice, Golden Queen

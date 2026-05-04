@@ -1,8 +1,11 @@
-"""Clipboard integration for the TCGplayer CLI.
+"""CLI-internal clipboard helper for scripts/.
 
 Provides platform-aware clipboard detection and a simple write function.
 Detection is intentionally cheap — uses only shutil.which and sys.platform,
 so it can be called once per CLI run without spawning any processes.
+
+This module is private to the CLI (leading-underscore name). It is NOT part
+of the public tcg library API and should not be imported from outside scripts/.
 """
 
 from __future__ import annotations

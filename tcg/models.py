@@ -6,10 +6,27 @@ from typing import Any
 
 @dataclass(frozen=True, slots=True)
 class AutocompleteHit:
-    # TCGplayer occasionally returns autocomplete entries with a null
-    # product-id (e.g. the card name exists but is not yet assigned to a
-    # specific product, such as pre-release or duplicate aggregates).
-    # Callers must check for None before issuing downstream requests.
+    """One suggestion row returned by the TCGplayer autocomplete endpoint.
+
+    TCGplayer occasionally returns entries with a ``None`` product ID —
+    for example, when a card name exists across multiple unresolved products
+    or is a pre-release item. The client filters these out before returning,
+    but callers should still guard against ``None`` if using :meth:`from_api`
+    directly.
+
+    Attributes:
+        product_id: Numeric TCGplayer product ID, or ``None`` if unresolved.
+        product_name: Display name of the card / product.
+        product_line_name: Display name of the product line
+            (e.g. ``"Grand Archive TCG"``). Matches keys in
+            :data:`tcg.PRODUCT_LINES`.
+        set_name: Display name of the set this product belongs to.
+        score: Server-side relevance score. Higher is more relevant.
+        duplicate: ``True`` when TCGplayer marks this row as a duplicate
+            aggregate (same name, multiple products). The client filters
+            these out automatically.
+    """
+
     product_id: int | None
     product_name: str
     product_line_name: str
@@ -31,6 +48,27 @@ class AutocompleteHit:
 
 @dataclass(frozen=True, slots=True)
 class Sale:
+    """One completed marketplace transaction for a TCGplayer product.
+
+    Returned by :meth:`~tcg.TCGplayerClient.latest_sales`. Each row is one
+    buyer-seller transaction and may cover multiple copies (see ``quantity``).
+
+    Attributes:
+        product_id: Numeric TCGplayer product ID this sale belongs to.
+        order_date: ISO-8601 date-time string of when the order was placed
+            (e.g. ``"2026-04-15T18:32:00"``). Use for recency sorting.
+        purchase_price: Price paid per copy, in USD. Does not include
+            shipping.
+        shipping_price: Shipping cost paid, in USD.
+        quantity: Number of copies in this transaction.
+        condition: Card condition label (e.g. ``"Near Mint"``), or ``None``
+            if not reported.
+        variant: Printing label (e.g. ``"Normal"``, ``"Foil"``), or ``None``
+            if not reported.
+        language: Language of the card (e.g. ``"English"``), or ``None`` if
+            not reported.
+    """
+
     product_id: int
     order_date: str
     purchase_price: float
@@ -56,6 +94,28 @@ class Sale:
 
 @dataclass(frozen=True, slots=True)
 class Listing:
+    """One active seller listing on the TCGplayer marketplace.
+
+    Returned by :meth:`~tcg.TCGplayerClient.listings`. Listings are sorted
+    by ``price + shipping`` ascending at the API layer, so the first row is
+    the cheapest available offer.
+
+    Attributes:
+        product_id: Numeric TCGplayer product ID this listing is for.
+        price: Asking price per copy, in USD. Does not include shipping.
+        shipping_price: Seller's shipping cost, in USD.
+        quantity: Number of copies available in this listing.
+        condition: Card condition label (e.g. ``"Near Mint"``), or ``None``
+            if not reported.
+        printing: Printing / foiling label (e.g. ``"Normal"``, ``"Foil"``),
+            or ``None`` if not reported.
+        language: Language of the card (e.g. ``"English"``), or ``None`` if
+            not reported.
+        seller_name: Display name of the seller, or ``None``.
+        seller_key: Internal seller identifier used by TCGplayer, or ``None``.
+        listing_id: Unique listing ID, or ``None`` if not returned.
+    """
+
     product_id: int
     price: float
     shipping_price: float
@@ -85,20 +145,39 @@ class Listing:
 
 @dataclass(frozen=True, slots=True)
 class ProductSearchResult:
-    """A single row from /v1/search/request. Used to enumerate every
-    product sharing a card name (reprints across different sets).
+    """One row from the TCGplayer product search endpoint.
 
-    Lighter than ProductDetails: no SKU list, no per-variant market
-    prices. Callers that need SKU-level data follow up with
-    product_details(product_id).
+    Returned by :meth:`~tcg.TCGplayerClient.search_products`. Use this to
+    enumerate every printing of a card across sets (reprints). Lighter than
+    :class:`ProductDetails`: no SKU list, no per-variant market prices.
+    Callers that need SKU-level data should follow up with
+    :meth:`~tcg.TCGplayerClient.product_details`.
+
+    Attributes:
+        product_id: Numeric TCGplayer product ID.
+        product_name: Display name of the card / product.
+        set_name: Display name of the set this product belongs to.
+        rarity_name: Rarity label (e.g. ``"Rare"``, ``"Legendary Rare"``),
+            or ``None`` if not reported.
+        market_price: Product-level market price in USD (Normal NM), or
+            ``None`` if no data is available.
+        release_date: ISO-8601 date string from ``customAttributes.releaseDate``
+            (e.g. ``"2026-03-21"``), or ``None`` if not set. Sort descending
+            for newest-first ordering.
+        collector_number: Collector number within the set (e.g. ``"013"``),
+            or ``None`` if not reported.
+        product_line_name: URL slug of the product line
+            (e.g. ``"grand-archive"``). Note: this is a slug, not a display
+            name — it differs from :attr:`AutocompleteHit.product_line_name`.
     """
+
     product_id: int
     product_name: str
     set_name: str
     rarity_name: str | None
-    market_price: float | None          # product-level (Normal NM)
-    release_date: str | None            # ISO-8601 from customAttributes.releaseDate
-    collector_number: str | None        # customAttributes.number, e.g. "013"
+    market_price: float | None  # product-level (Normal NM)
+    release_date: str | None  # ISO-8601 from customAttributes.releaseDate
+    collector_number: str | None  # customAttributes.number, e.g. "013"
     product_line_name: str | None
 
     @classmethod
@@ -119,11 +198,23 @@ class ProductSearchResult:
 
 @dataclass(frozen=True, slots=True)
 class Sku:
-    """One SKU = (product × printing × condition × language).
-    Use the sku_id to query the pricepoints endpoint for market_price."""
+    """One SKU — a (product × printing × condition × language) combination.
+
+    SKUs are embedded inside :class:`ProductDetails` and are the atomic unit
+    for market price lookups. Pass :attr:`sku_id` to
+    :meth:`~tcg.TCGplayerClient.market_price` to get per-variant pricing.
+
+    Attributes:
+        sku_id: Numeric TCGplayer SKU identifier.
+        printing: Foiling / treatment label (e.g. ``"Normal"``, ``"Foil"``).
+        condition: Card condition label (e.g. ``"Near Mint"``,
+            ``"Lightly Played"``).
+        language: Language of the card (e.g. ``"English"``).
+    """
+
     sku_id: int
-    printing: str        # "Normal" / "Foil"
-    condition: str       # "Near Mint" / ...
+    printing: str  # "Normal" / "Foil"
+    condition: str  # "Near Mint" / ...
     language: str
 
     @classmethod
@@ -138,16 +229,48 @@ class Sku:
 
 @dataclass(frozen=True, slots=True)
 class ProductDetails:
-    """/v2/product/{id}/details — TCGplayer's authoritative per-product summary.
-    `market_price` here is Normal NM; per-variant prices need pricepoints API."""
+    """Full metadata and pricing summary for one TCGplayer product.
+
+    Returned by :meth:`~tcg.TCGplayerClient.product_details`. This is
+    TCGplayer's authoritative per-product record. ``market_price`` is the
+    Normal NM product-level value; for Foil or other variant prices use
+    :meth:`~tcg.TCGplayerClient.market_price` with the relevant SKU IDs.
+
+    Attributes:
+        product_id: Numeric TCGplayer product ID.
+        product_name: Display name of the card / product.
+        set_name: Display name of the set.
+        set_code: Short set identifier (e.g. ``"DTR1E"``, ``"PTM"``), or
+            ``None`` if not reported.
+        collector_number: Collector number within the set (e.g. ``"004"``),
+            or ``None`` if not reported.
+        rarity_name: Rarity label (e.g. ``"Rare"``), or ``None``.
+        market_price: Normal NM market price in USD at the product level, or
+            ``None`` if unavailable. For Foil market price, query the
+            pricepoints endpoint via :meth:`~tcg.TCGplayerClient.market_price`.
+        lowest_price: Lowest listing price in USD across all variants, or
+            ``None``.
+        median_price: Median listing price in USD across all variants, or
+            ``None``.
+        lowest_price_with_shipping: Lowest combined price + shipping in USD,
+            or ``None``.
+        sellers: Number of distinct sellers with active listings, or ``None``
+            if not reported.
+        foil_only: ``True`` if this product exists only in foil.
+        normal_only: ``True`` if this product exists only in non-foil.
+        skus: All SKUs for this product (all printings × conditions ×
+            languages). Use to find the :attr:`Sku.sku_id` for a specific
+            variant.
+    """
+
     product_id: int
     product_name: str
     set_name: str
-    set_code: str | None                # e.g. "DTR1E", "PTM"
-    collector_number: str | None        # e.g. "004", "013"
+    set_code: str | None  # e.g. "DTR1E", "PTM"
+    collector_number: str | None  # e.g. "004", "013"
     rarity_name: str | None
-    market_price: float | None          # Normal NM (product-level)
-    lowest_price: float | None          # lowest across all variants of this product
+    market_price: float | None  # Normal NM (product-level)
+    lowest_price: float | None  # lowest across all variants of this product
     median_price: float | None
     lowest_price_with_shipping: float | None
     sellers: int | None
@@ -198,7 +321,25 @@ class ProductDetails:
 
 @dataclass(frozen=True, slots=True)
 class MarketPrice:
-    """Per-SKU market stats from /v1/pricepoints/marketprice/skus/search."""
+    """Market price statistics for one SKU.
+
+    Returned by :meth:`~tcg.TCGplayerClient.market_price`. Each instance
+    corresponds to one (product × printing × condition × language) SKU.
+    Normal and Foil variants have separate :class:`MarketPrice` rows.
+
+    Attributes:
+        sku_id: Numeric TCGplayer SKU identifier.
+        market_price: Computed market price in USD, or ``None`` if
+            insufficient data. TCGplayer derives this from recent sales.
+        lowest_price: Lowest active listing price in USD, or ``None``.
+        highest_price: Highest active listing price in USD, or ``None``.
+        price_count: Number of recent sale data points used to calculate
+            ``market_price``, or ``None`` if not reported.
+        calculated_at: Server-side ISO-8601 timestamp of when this market
+            price was last computed (e.g. ``"2026-04-30T12:00:00"``), or
+            ``None``.
+    """
+
     sku_id: int
     market_price: float | None
     lowest_price: float | None
