@@ -2,6 +2,29 @@
 
 All notable changes documented here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-05-04
+
+### Changed
+- The CLI now detects whether stdout is connected to a terminal. When
+  it is (the default day-to-day case), a Rich Table preview with 7 key
+  columns is rendered to stdout instead of the full 23-column TSV. The
+  TSV remains exactly what it was on the clipboard and on disk via
+  `--output PATH` — only the visible terminal output changes.
+- When stdout is piped or redirected (`| pbcopy`, `> file.tsv`, scripts
+  consuming the CLI), the full TSV is emitted as before. No
+  integration breaks.
+
+### Why
+Tab-separated values are not a human-readable terminal format — tabs
+render with inconsistent widths, columns drift, and a 23-column row
+wraps unreadably on most terminal widths. The TSV is for spreadsheets
+and machine consumers; humans staring at the terminal deserve a
+seven-column preview that fits.
+
+The full TSV is still available where it matters: in your clipboard
+ready to paste into a Google Sheet (where Sheets handles all 23
+columns), and in any file you write via `--output`.
+
 ## [1.0.1] — 2026-05-04
 
 ### Changed (BREAKING for users with existing user-global config)

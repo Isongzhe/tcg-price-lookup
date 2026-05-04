@@ -30,9 +30,14 @@ TSV is printed to your terminal AND copied to your clipboard. Paste it into a Go
 
 ## Sample output
 
-Tab-separated, one row per `card × printing × condition × reprint set`. Key columns at a glance:
+Tab-separated, one row per `card × printing × condition × reprint set`.
+**All prices are per-card** (not multiplied by `qty`). For a deck total,
+multiply `qty × market_price` in your spreadsheet.
 
-**All prices are per-card** (not multiplied by `qty`). For a deck total, multiply `qty × market_price` in your spreadsheet, or sum the column.
+When you run the CLI in a terminal, you see a compact 7-column preview
+of this data; the full 23-column TSV is on your clipboard ready to
+paste. When you pipe the CLI's stdout to a file or another command,
+the full TSV is emitted directly. Below shows what the TSV looks like:
 
 | section | qty | card_name | set_name | printing | condition | market_price |
 |---|---|---|---|---|---|---|
