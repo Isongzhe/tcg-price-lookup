@@ -1,4 +1,4 @@
-"""Tests for the --list-endpoints CLI flag in scripts/fetch_deck.py.
+"""Tests for the --show-endpoints CLI flag in scripts/fetch_deck.py.
 
 Uses the in-process approach (calling main() directly) rather than subprocess
 so that: (1) no network calls are possible without mocking the session, and
@@ -16,7 +16,7 @@ from tcg import endpoints
 
 
 def _capture_table() -> tuple[int, Table | None]:
-    """Run ``main(["--list-endpoints"])`` and return (exit_code, table_object).
+    """Run ``main(["--show-endpoints"])`` and return (exit_code, table_object).
 
     Intercepts the Rich Table passed to ``console.print`` directly so we can
     inspect column headers and cell values without depending on the text
@@ -31,12 +31,12 @@ def _capture_table() -> tuple[int, Table | None]:
                 tables_printed.append(obj)
 
         mock_console.print.side_effect = capture
-        exit_code = main(["--list-endpoints"])
+        exit_code = main(["--show-endpoints"])
 
     return exit_code, tables_printed[0] if tables_printed else None
 
 
-class TestListEndpointsCLI:
+class TestShowEndpointsCLI:
     def test_exit_code_zero(self):
         code, _ = _capture_table()
         assert code == 0
@@ -53,13 +53,13 @@ class TestListEndpointsCLI:
         joined = " ".join(cell_texts)
         for ep in endpoints.ALL:
             assert ep.name in joined, (
-                f"endpoint name {ep.name!r} missing from --list-endpoints table cells"
+                f"endpoint name {ep.name!r} missing from --show-endpoints table cells"
             )
 
     def test_does_not_instantiate_client(self):
         """Early-exit path must not create a TCGplayerClient (no network)."""
         with patch("scripts.fetch_deck.TCGplayerClient") as mock_client:
-            main(["--list-endpoints"])
+            main(["--show-endpoints"])
             mock_client.assert_not_called()
 
     def test_output_contains_column_headers(self):

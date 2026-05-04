@@ -47,14 +47,10 @@ from tcg.deck import parse_decklist
 from tcg.decklist import DeckRow, enrich
 from tcg.output import print_tsv
 from tcg.product_lines import PRODUCT_LINES, suggest, to_slug
-from tcg.storage import HISTORY_AVAILABLE, append_snapshot, snapshot_to_rows
 
 # All human-facing output goes through this console (stderr). stdout is
 # reserved for the TSV so piping through pbcopy/xclip works cleanly.
 console = Console(stderr=True)
-
-# Hardcoded internals — not user-facing flags.
-_SLEEP_BETWEEN_CARDS = 0.8
 
 
 def _clipboard_paste_hint() -> str:
@@ -151,9 +147,16 @@ def main(argv: list[str] | None = None) -> int:
         help="print all known product lines as display<TAB>slug, then exit",
     )
     parser.add_argument(
-        "--list-endpoints",
+        "--show-endpoints",
         action="store_true",
-        help="print a table of all TCGplayer endpoints in the catalog, then exit",
+        dest="show_endpoints",
+        help="print the TCGplayer endpoints this CLI is configured to call, then exit",
+    )
+    parser.add_argument(
+        "--show-config",
+        action="store_true",
+        dest="show_config",
+        help="print the resolved configuration and where each value came from, then exit",
     )
     parser.add_argument(
         "--printings",
@@ -164,12 +167,6 @@ def main(argv: list[str] | None = None) -> int:
         "--conditions",
         default=None,
         help="comma-separated conditions to show (default from config: Near Mint). Use 'all' for everything.",
-    )
-    parser.add_argument(
-        "--parquet",
-        action="store_true",
-        default=False,
-        help="append a snapshot to data/snapshots.parquet (opt-in; requires the 'history' extras)",
     )
     parser.add_argument(
         "--no-copy",
@@ -199,8 +196,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{display}\t{slug}")
         return 0
 
-    # --list-endpoints: render a Rich table of all catalog entries, then exit
-    if args.list_endpoints:
+    # --show-endpoints: render a Rich table of the endpoint catalog, then exit
+    if args.show_endpoints:
         from rich.table import Table
 
         table = Table(title="TCGplayer Endpoint Catalog", show_lines=True)
@@ -213,9 +210,6 @@ def main(argv: list[str] | None = None) -> int:
         console.print(table)
         return 0
 
-    if args.source is None:
-        parser.error("the following arguments are required: source")
-
     # Build config — CLI values only override when explicitly passed (non-None).
     cli_overrides: dict = {}
     if args.product_line is not None:
@@ -224,12 +218,44 @@ def main(argv: list[str] | None = None) -> int:
         cli_overrides["printings"] = [p.strip() for p in args.printings.split(",") if p.strip()]
     if args.conditions is not None:
         cli_overrides["conditions"] = [c.strip() for c in args.conditions.split(",") if c.strip()]
-    if args.parquet:
-        cli_overrides["write_parquet"] = True
     if args.output_path is not None:
         cli_overrides["output_path"] = args.output_path
 
-    config = load_config(cli_overrides, config_path=args.config_path)
+    config, _config_sources = load_config(cli_overrides, config_path=args.config_path)
+
+    # --show-config: render resolved config + source attribution, then exit
+    if args.show_config:
+        from rich.table import Table
+
+        _SOURCE_STYLE = {
+            "cli": "bold green",
+            "env": "bold yellow",
+            "toml": "bold cyan",
+            "default": "dim",
+        }
+
+        console.print("\nResolved configuration:\n")
+        cfg_table = Table(show_header=True, box=None, padding=(0, 2))
+        cfg_table.add_column("Setting", style="bold", no_wrap=True)
+        cfg_table.add_column("Value")
+        cfg_table.add_column("Source", no_wrap=True)
+
+        from scripts._config import _DEFAULTS
+
+        for field in _DEFAULTS:
+            value = getattr(config, field)
+            source = _config_sources.get(field, "default")
+            source_label = f"[{_SOURCE_STYLE[source]}]{source}[/{_SOURCE_STYLE[source]}]"
+            cfg_table.add_row(field, str(value), source_label)
+
+        console.print(cfg_table)
+        console.print(
+            "\n[dim]Search order: CLI flags > env vars > tcg.toml > built-in defaults[/dim]"
+        )
+        return 0
+
+    if args.source is None:
+        parser.error("the following arguments are required: source")
 
     # Soft validation of --product-line
     if args.product_line is not None and to_slug(args.product_line) is None:
@@ -275,22 +301,12 @@ def main(argv: list[str] | None = None) -> int:
                 description=f"[cyan]{entry.quantity}x[/cyan] {entry.card_name}",
             )
             results = enrich(client, entry, config.product_line)
-            parquet_enabled = HISTORY_AVAILABLE and (args.parquet or config.write_parquet)
-            for row, sales, listings in results:
+            for row, _sales, _listings in results:
                 rows.append(row)
-                if parquet_enabled and row.product_id is not None:
-                    snap_rows = snapshot_to_rows(
-                        product_id=row.product_id,
-                        card_name=row.matched_name or row.card_name,
-                        sales=sales,
-                        listings=listings,
-                        market_prices=[],
-                    )
-                    append_snapshot(snap_rows)
 
             progress.advance(task_id)
             if i < len(entries):
-                time.sleep(_SLEEP_BETWEEN_CARDS)
+                time.sleep(config.request_interval)
 
     # Resolve filter sets from config
     printings_str = ",".join(config.printings)
