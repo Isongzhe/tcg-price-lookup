@@ -23,7 +23,7 @@ from tcg.models import (
 from tcg.output import print_tsv
 from tcg.product_lines import PRODUCT_LINES, to_slug
 
-__all__ = [  # noqa: RUF022 — order is a stable public-API contract (see CLAUDE.md)
+__all__ = [  # noqa: RUF022 — ordering is part of the stable public-API contract
     "__version__",
     "TCGplayerClient",
     "TCGplayerError",

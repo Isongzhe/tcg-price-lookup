@@ -1,5 +1,5 @@
 [project]
-name = "tcg"
+name = "tcg-price-lookup"
 version = "1.0.0"
 description = "TCGplayer price scraper for Grand Archive and other TCG card pools"
 readme = "README.md"

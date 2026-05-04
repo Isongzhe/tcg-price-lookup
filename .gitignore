@@ -23,6 +23,9 @@ decks/*
 prices/
 notes/
 
-# Stale Chinese personal notes (kept locally, not for public repo)
+# Maintainer guide — kept locally, not for public repo
+CLAUDE.md
+
+# Stale personal notes (kept locally, not for public repo)
 google_sheet.md
 summary.md

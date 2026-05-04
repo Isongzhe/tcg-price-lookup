@@ -308,7 +308,7 @@ wheels = [
 ]
 
 [[package]]
-name = "tcg"
+name = "tcg-price-lookup"
 version = "1.0.0"
 source = { editable = "." }
 dependencies = [
