@@ -42,7 +42,7 @@ from rich.progress import (
 from scripts._clipboard import write_to_clipboard
 from scripts._config import load_config
 from tcg import endpoints
-from tcg.client import TCGplayerClient
+from tcg.client import TCGplayerClient, TCGplayerError
 from tcg.deck import parse_decklist
 from tcg.decklist import DeckRow, enrich
 from tcg.output import print_tsv
@@ -370,7 +370,22 @@ def main(argv: list[str] | None = None) -> int:
                 task_id,
                 description=f"[cyan]{entry.quantity}x[/cyan] {entry.card_name}",
             )
-            results = enrich(client, entry, config.product_line)
+            try:
+                results = enrich(client, entry, config.product_line)
+            except TCGplayerError as exc:
+                rows.append(
+                    DeckRow(
+                        section=entry.section,
+                        quantity=entry.quantity,
+                        card_name=entry.card_name,
+                        product_id=None,
+                        matched_name=None,
+                        set_name=None,
+                        missing_reason=f"API error after retry: {exc}",
+                    )
+                )
+                progress.advance(task_id)
+                continue
             for row, _sales, _listings in results:
                 rows.append(row)
 
