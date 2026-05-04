@@ -2,6 +2,23 @@
 
 All notable changes documented here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] — 2026-05-04
+
+### Fixed
+- TCGplayer's `/v2/product/{id}/details` endpoint occasionally returns
+  400 Bad Request due to a transient backend cache/sync race; the same
+  productId succeeds seconds later. The client now retries 4xx/5xx
+  responses (400, 403, 429, 500, 502, 503, 504), not just 403/429.
+- The CLI batch loop now catches `TCGplayerError` per card. A card
+  whose API call fails after retry is recorded as missing (visible in
+  the red NOT FOUND panel) instead of crashing the entire run.
+
+### Changed
+- Retryable HTTP status codes are now declared as a named module-level
+  constant `RETRYABLE_STATUS_CODES` in `tcg.client`, using
+  `http.HTTPStatus` enum values rather than magic numbers. Internal;
+  not part of the public API.
+
 ## [1.1.0] — 2026-05-04
 
 ### Changed

@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from scripts.fetch_deck import main
+from tcg.client import TCGplayerError
 from tcg.decklist import DeckRow, VariantStats
 
 
@@ -72,6 +73,33 @@ def _run_main_with_stub(argv: list[str], monkeypatch) -> tuple[int, str]:
     return exit_code, captured.getvalue()
 
 
+def _run_main_with_stub_custom_enrich(
+    argv: list[str],
+    custom_enrich,
+    monkeypatch,
+) -> tuple[int, str]:
+    """Run main(argv) with a caller-supplied enrich function.
+
+    Returns (exit_code, captured_stdout).
+    Uses a real Console redirected to a buffer so Rich Progress
+    internal time comparisons work without MagicMock issues.
+    """
+    from rich.console import Console
+
+    monkeypatch.setattr("scripts.fetch_deck.enrich", custom_enrich)
+
+    captured = io.StringIO()
+    stderr_buf = io.StringIO()
+    real_console = Console(file=stderr_buf, highlight=False)
+    with (
+        patch("sys.stdout", captured),
+        patch("scripts.fetch_deck.console", real_console),
+    ):
+        exit_code = main(argv)
+
+    return exit_code, captured.getvalue()
+
+
 class TestOutputFlag:
     def test_output_flag_writes_tsv_to_file(self, tmp_path: Path, monkeypatch):
         """--output writes the TSV to the given file path."""
@@ -124,3 +152,51 @@ class TestOutputFlag:
             monkeypatch,
         )
         assert exit_code == 1
+
+
+class TestBatchResilience:
+    """A TCGplayerError on one card must not crash the whole batch."""
+
+    def test_main_loop_continues_after_enrich_failure(self, tmp_path, monkeypatch):
+        """A failing enrich for one card must not crash the batch.
+
+        The failing card should appear as a missing row with a
+        missing_reason that includes the error text, while the other
+        cards are processed normally.
+        """
+        deck_file = tmp_path / "deck.txt"
+        deck_file.write_text("# Deck\n1 Card A\n1 Card B\n1 Card C\n")
+
+        call_count = [0]
+
+        def fake_enrich(client, entry, product_line=None):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                raise TCGplayerError("GET /v2/product/X/details → 400: transient error")
+            return [(_make_stub_deck_row(entry.card_name), [], [])]
+
+        exit_code, tsv = _run_main_with_stub_custom_enrich(
+            [str(deck_file), "--no-copy"],
+            fake_enrich,
+            monkeypatch,
+        )
+
+        assert exit_code == 0
+
+        lines = [line for line in tsv.splitlines() if line.strip()]
+        # header + 3 data rows (one per card)
+        assert len(lines) == 4, f"Expected 4 lines (header + 3 cards), got {len(lines)}"
+
+        data_rows = lines[1:]
+        # Card B (second card) should be a missing row
+        card_b_row = next((row for row in data_rows if "Card B" in row), None)
+        assert card_b_row is not None, "Card B row not found in output"
+        assert "API error after retry" in card_b_row, (
+            f"Expected missing_reason in Card B row, got: {card_b_row!r}"
+        )
+
+        # Cards A and C should be normal rows with no missing_reason
+        card_a_row = next((row for row in data_rows if "Card A" in row), None)
+        card_c_row = next((row for row in data_rows if "Card C" in row), None)
+        assert card_a_row is not None
+        assert card_c_row is not None

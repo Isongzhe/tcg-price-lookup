@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import http
 import time
 import uuid
 from typing import Any
@@ -33,6 +34,18 @@ from tcg.product_lines import to_slug
 _CHROME_VERSION = "146"
 _IMPERSONATE = f"chrome{_CHROME_VERSION}"
 _COMMON_HEADERS = build_headers(_CHROME_VERSION)
+
+RETRYABLE_STATUS_CODES: frozenset[http.HTTPStatus] = frozenset(
+    {
+        http.HTTPStatus.BAD_REQUEST,  # 400 — TCGplayer cache miss / inter-service sync race; transient
+        http.HTTPStatus.FORBIDDEN,  # 403 — Cloudflare bot challenge; warm-up may need refresh
+        http.HTTPStatus.TOO_MANY_REQUESTS,  # 429 — rate limit; back off and retry
+        http.HTTPStatus.INTERNAL_SERVER_ERROR,  # 500 — server fault, may recover
+        http.HTTPStatus.BAD_GATEWAY,  # 502 — load balancer / upstream issue
+        http.HTTPStatus.SERVICE_UNAVAILABLE,  # 503 — temporary unavailability
+        http.HTTPStatus.GATEWAY_TIMEOUT,  # 504 — upstream slow; may pass on retry
+    }
+)
 
 
 class TCGplayerError(Exception):
@@ -92,7 +105,7 @@ class TCGplayerClient:
             headers=_COMMON_HEADERS,
             impersonate=_IMPERSONATE,
         )
-        if resp.status_code in (403, 429) and retry:
+        if resp.status_code in RETRYABLE_STATUS_CODES and retry:
             self._warmed_up = False
             time.sleep(2.0)
             return self._request(method, url, params=params, json=json, retry=False)
