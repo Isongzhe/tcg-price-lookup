@@ -1,17 +1,13 @@
-"""Minimal smoke-test script.
+"""Connectivity smoke test.
 
-Demonstrates the simplest possible use of the library: instantiate a client
-and fetch recent sales for a single product id. Intended as a quick check
-that the environment is set up correctly and that the upstream endpoint is
-reachable.
+Maintainer / dev tool. Instantiates a client and fetches recent sales for
+a single hardcoded product id, used as a quick check that the environment
+is set up correctly and the upstream endpoint is reachable. Not intended
+as a user-facing CLI — for real use, see ``scripts/fetch_deck.py``.
 
-For real use, prefer the CLI::
+Run::
 
-    uv run python -m scripts.fetch_deck <decklist> --product-line "<name>"
-
-Run this file directly::
-
-    uv run python main.py
+    uv run python -m scripts.smoke_test
 """
 
 from __future__ import annotations

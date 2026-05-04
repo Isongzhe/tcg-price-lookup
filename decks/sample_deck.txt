@@ -1,0 +1,11 @@
+# Material Deck
+1 Alice, Golden Queen
+1 Alice, Whim's Monarch
+1 Alice, Trifle's Royalty
+1 Lost Providence
+
+# Main Deck
+3 Golden Checkmate
+
+# Sideboard
+2 Surging Obstruction
