@@ -29,17 +29,19 @@ TSV is printed to your terminal AND copied to your clipboard. Paste it into a Go
 
 ## Sample output
 
-```
-section         qty  card_name              matched_name           set_name              set_code  number  rarity      released    product_id  sku_id   printing  condition  market_price  mp_sample  most_recent_sale  sale_avg  sale_count  listing_min  listing_avg  listing_count  image_url  missing
-Material Deck   1    Alice, Golden Queen    Alice, Golden Queen    Distorted Reflections  DTR1E     004     Super Rare              644912      8847720  Normal    Near Mint  3.95          25         4.99              4.53      5           2.54         3.95         6              https://…
-Material Deck   1    Alice, Golden Queen    Alice, Golden Queen    Distorted Reflections  DTR1E     004     Super Rare              644912      8847725  Foil      Near Mint  40.99         5                                        0           39.70        40.17        4              https://…
-Material Deck   1    Lost Providence        Lost Providence        Radiant Origins        RDO       409     Ultra Rare  2026-04-03  688306      9230342  Normal    Near Mint  43.07         25         42.50             42.76     5           42.50        49.05        19             https://…
-Material Deck   1    Lost Providence        Lost Providence        Phantom Monarchs       PTM       013     Ultra Rare  2025-12-05  665290      9028922  Normal    Near Mint  143.58        25         142.86            137.31    5           122.04       142.72       6              https://…
-Main Deck       3    Golden Checkmate       Golden Checkmate       Radiant Origins        RDO       85      Ultra Rare              688297      9230292  Normal    Near Mint  24.63         25         20.00             24.24     5           21.67        26.73        20             https://…
-Sideboard       2    Surging Obstruction    Surging Obstruction    Radiant Origins        RDO       247     Uncommon                688033      9227901  Normal    Near Mint  0.68          5          0.64              0.64      4           0.48         0.70         20             https://…
-```
+Tab-separated, one row per `card × printing × condition × reprint set`. Key columns at a glance:
 
-One row per card × printing × condition × reprint set. The full 23-column schema is documented in [`scripts/README.md`](./scripts/README.md).
+| section | qty | card_name | set_name | printing | condition | market_price |
+|---|---|---|---|---|---|---|
+| Material Deck | 1 | Alice, Golden Queen | Distorted Reflections | Normal | Near Mint | 3.95 |
+| Material Deck | 1 | Alice, Golden Queen | Distorted Reflections | Foil | Near Mint | 40.99 |
+| Material Deck | 1 | Lost Providence | Radiant Origins | Normal | Near Mint | 43.07 |
+| Material Deck | 1 | Lost Providence | Phantom Monarchs | Normal | Near Mint | 143.58 |
+| Main Deck | 3 | Golden Checkmate | Radiant Origins | Normal | Near Mint | 24.63 |
+
+Reprints (e.g. `Lost Providence`) appear once per set; the cheapest version is usually the most recent. The full 23-column TSV (image URL, sku id, listing range, recent sale stats, etc.) is in [`prices/sample_deck.tsv`](./prices/sample_deck.tsv); each column's meaning is documented in [`scripts/README.md`](./scripts/README.md).
+
+The CLI writes this output to **three places at once**: stdout, the system clipboard, and (optionally) a file via `--output PATH` or the `output_path` config key.
 
 ---
 

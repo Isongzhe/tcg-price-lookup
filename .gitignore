@@ -20,7 +20,8 @@ data/
 # under decks/ is personal and ignored.
 decks/*
 !decks/sample_deck.txt
-prices/
+prices/*
+!prices/sample_deck.tsv
 notes/
 
 # Maintainer guide — kept locally, not for public repo
