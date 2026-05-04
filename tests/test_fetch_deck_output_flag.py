@@ -89,13 +89,38 @@ class TestOutputFlag:
         # Data row must contain the canned card name
         assert "Alice, Golden Queen" in content
 
-    def test_output_flag_failure_returns_nonzero(self, tmp_path: Path, monkeypatch, capsys):
-        """--output to a nonexistent directory returns exit code 1, no traceback."""
-        bad_path = "/nonexistent_dir_xyz/out.tsv"
+    def test_output_flag_creates_missing_parent_dir(self, tmp_path: Path, monkeypatch):
+        """--output silently creates the parent directory if it does not exist.
+
+        Matches the behaviour of `git`, `curl -o`, `wget -O`, and most
+        Unix tools that accept an output path: the user said where they
+        want the file, so the tool prepares the path. Without this, a
+        first-run user who set `output_path = "prices/last_run.tsv"` in
+        config but never ran `mkdir prices/` would hit a confusing error.
+        """
+        nested = tmp_path / "deeply" / "nested" / "out.tsv"
+        assert not nested.parent.exists(), "test precondition: parent should not exist"
+
+        exit_code, _ = _run_main_with_stub(
+            ["-", "--no-copy", f"--output={nested}"],
+            monkeypatch,
+        )
+        assert exit_code == 0
+        assert nested.exists(), "output file was not created"
+        assert nested.parent.is_dir(), "parent directory was not auto-created"
+        assert "Alice, Golden Queen" in nested.read_text(encoding="utf-8")
+
+    def test_output_flag_real_failure_returns_nonzero(self, tmp_path: Path, monkeypatch):
+        """A genuine OSError (e.g. parent path is a regular file, not a dir)
+        still returns exit code 1 instead of crashing with a traceback."""
+        # Create a regular file where we'd want a directory — mkdir will
+        # fail because the path component already exists as a file.
+        blocking_file = tmp_path / "blocker"
+        blocking_file.write_text("not a directory")
+        bad_path = blocking_file / "out.tsv"  # parent is a regular file → mkdir fails
+
         exit_code, _ = _run_main_with_stub(
             ["-", "--no-copy", f"--output={bad_path}"],
             monkeypatch,
         )
         assert exit_code == 1
-        # No traceback in stdout/stderr from subprocess (we're in-process, so
-        # the console mock swallows rich output; just verify exit code is 1)

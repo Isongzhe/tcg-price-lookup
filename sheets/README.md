@@ -79,6 +79,26 @@ If you prefer not to copy an opaque document:
 
 ---
 
+## Refreshing data
+
+Once you've run **TCG Management → Run Data Formatting** on a sheet,
+column A holds `=IMAGE()` formulas, several columns are grouped or
+hidden, and the row heights are customised. Pasting fresh TSV with
+regular ⌘V / Ctrl+V tries to merge the clipboard's plain text with
+that existing structure and can shift columns, overwrite the
+image-formula column, or jam the entire TSV into a single cell.
+
+To refresh an already-formatted sheet, use **paste values only**:
+
+- macOS: **⌘ + Shift + V**
+- Windows / Linux: **Ctrl + Shift + V**
+
+For a fresh empty sheet (or a sheet you have not yet run the
+formatter on), regular ⌘V / Ctrl+V is fine — this only matters
+once the sheet has been formatted.
+
+---
+
 ## Authorization prompt
 
 The first time the formatter runs, Google will ask you to authorize

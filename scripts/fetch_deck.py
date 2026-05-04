@@ -323,11 +323,15 @@ def main(argv: list[str] | None = None) -> int:
     if config.copy_to_clipboard and not args.no_copy:
         clipboard_copied = write_to_clipboard(tsv_text)
 
-    # Write to file if --output / output_path is set
+    # Write to file if --output / output_path is set. Parent directories
+    # are auto-created (mirrors `git`, `curl -o`, `wget -O` behaviour) so
+    # users whose config sets `output_path = "prices/last_run.tsv"` don't
+    # need to remember to `mkdir prices/` before the first run.
     written_output_path: Path | None = None
     if config.output_path is not None:
         output_path = Path(config.output_path).expanduser()
         try:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
             output_path.write_text(tsv_text, encoding="utf-8")
             written_output_path = output_path
         except OSError as exc:
