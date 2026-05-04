@@ -9,8 +9,11 @@ Priority order (highest to lowest):
   4. Hardcoded defaults
 
 Search order for TOML when config_path is None:
-  1. ./tcg.toml  (project-local)
-  2. ~/.config/tcg/config.toml  (user-global)
+  1. ./tcg.toml  (project-local, gitignored — copy from tcg.toml.example)
+
+When the file does not exist, hardcoded defaults are used. No errors
+are raised on missing config — running without tcg.toml is a valid
+zero-config workflow.
 
 This module is private to the CLI (leading-underscore name). It is NOT part
 of the public tcg library API and should not be imported from outside scripts/.
@@ -33,8 +36,8 @@ _DEFAULTS: dict[str, Any] = {
     "printings": ["Normal", "Foil"],
     "conditions": ["Near Mint"],
     "copy_to_clipboard": True,
-    "write_parquet": False,
     "output_path": None,
+    "request_interval": 0.8,
 }
 
 _KNOWN_KEYS = frozenset(_DEFAULTS.keys())
@@ -45,8 +48,8 @@ _ENV_MAP = {
     "TCG_PRINTINGS": "printings",
     "TCG_CONDITIONS": "conditions",
     "TCG_COPY_TO_CLIPBOARD": "copy_to_clipboard",
-    "TCG_WRITE_PARQUET": "write_parquet",
     "TCG_OUTPUT_PATH": "output_path",
+    "TCG_REQUEST_INTERVAL": "request_interval",
 }
 
 
@@ -63,8 +66,8 @@ class Config:
     printings: list[str]
     conditions: list[str]
     copy_to_clipboard: bool
-    write_parquet: bool
     output_path: Path | None
+    request_interval: float
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +130,7 @@ def load_config(
     *,
     config_path: Path | None = None,
     env: dict[str, str] | None = None,
-) -> Config:
+) -> tuple[Config, dict[str, str]]:
     """Build a Config by merging defaults, TOML, env vars, and CLI overrides.
 
     Parameters
@@ -136,10 +139,17 @@ def load_config(
         Keys present here (non-None values) take highest precedence.
     config_path:
         Explicit path to a TOML file. If None, the function probes
-        ``./tcg.toml`` then ``~/.config/tcg/config.toml``.
+        ``./tcg.toml`` only.
     env:
         Mapping of environment variables. Defaults to ``os.environ`` when
         None — pass an explicit dict in tests to avoid touching real env.
+
+    Returns
+    -------
+    tuple[Config, dict[str, str]]
+        A ``(config, sources)`` pair. ``sources`` maps each field name to the
+        layer that provided its final value: ``"default"``, ``"toml"``,
+        ``"env"``, or ``"cli"``.
     """
     import os
 
@@ -148,18 +158,14 @@ def load_config(
 
     # --- 1. Start with defaults ---
     merged: dict[str, Any] = dict(_DEFAULTS)
+    sources: dict[str, str] = {key: "default" for key in _KNOWN_KEYS}
 
     # --- 2. Resolve TOML path ---
     toml_path: Path | None = config_path
     if toml_path is None:
-        candidates = [
-            Path("tcg.toml"),
-            Path.home() / ".config" / "tcg" / "config.toml",
-        ]
-        for candidate in candidates:
-            if candidate.exists():
-                toml_path = candidate
-                break
+        candidate = Path("tcg.toml")
+        if candidate.exists():
+            toml_path = candidate
 
     # --- 3. Apply TOML values ---
     if toml_path is not None:
@@ -169,37 +175,51 @@ def load_config(
                 val = raw_toml[key]
                 if key == "output_path" and isinstance(val, str):
                     val = _parse_path(val)
+                if key == "request_interval":
+                    val = float(val)
                 merged[key] = val
+                sources[key] = "toml"
 
     # --- 4. Apply env var overrides ---
     for env_key, field_name in _ENV_MAP.items():
         if env_key not in env:
             continue
         raw_val = env[env_key]
-        if field_name in ("copy_to_clipboard", "write_parquet"):
+        if field_name == "copy_to_clipboard":
             merged[field_name] = _parse_bool(raw_val)
         elif field_name in ("printings", "conditions"):
             merged[field_name] = _parse_comma_list(raw_val)
         elif field_name == "output_path":
             merged[field_name] = _parse_path(raw_val)
+        elif field_name == "request_interval":
+            try:
+                merged[field_name] = float(raw_val)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Cannot parse {env_key}={raw_val!r} as a float. "
+                    f"Expected a number, e.g. {env_key}=0.8"
+                ) from exc
         else:
             merged[field_name] = raw_val
+        sources[field_name] = "env"
 
     # --- 5. Apply CLI overrides (skip None — means "not provided") ---
     for key, value in cli_overrides.items():
         if value is not None and key in _KNOWN_KEYS:
             merged[key] = value
+            sources[key] = "cli"
 
     # Normalise output_path: if it's still a string (shouldn't be, but be safe), convert it
     raw_output_path = merged.get("output_path")
     if isinstance(raw_output_path, str):
         raw_output_path = _parse_path(raw_output_path)
 
-    return Config(
+    config = Config(
         product_line=merged["product_line"],
         printings=list(merged["printings"]),
         conditions=list(merged["conditions"]),
         copy_to_clipboard=bool(merged["copy_to_clipboard"]),
-        write_parquet=bool(merged["write_parquet"]),
         output_path=raw_output_path,
+        request_interval=float(merged["request_interval"]),
     )
+    return config, sources

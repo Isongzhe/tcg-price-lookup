@@ -2,6 +2,63 @@
 
 All notable changes documented here. Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] — 2026-05-04
+
+### Changed (BREAKING for users with existing user-global config)
+- `~/.config/tcg/config.toml` is no longer read. The CLI now looks for
+  `./tcg.toml` only (in the directory the command is run from).
+  Migration: copy your existing user-global config into the repo as
+  `tcg.toml` (it is gitignored).
+- `tcg.toml.example` shipped at repo root as the canonical template;
+  copy to `tcg.toml` and edit. Same pattern as `.env.example` / `.env`.
+
+### Rationale
+- One configuration location is easier to reason about than two with a
+  precedence rule. Most users keep this repo as a working directory
+  (`decks/`, `prices/`, `notes/` already follow that convention), so
+  putting config alongside makes the "where do I change settings"
+  question trivially discoverable.
+
+### Removed (CLI surface only)
+- `--parquet` CLI flag.
+- `write_parquet` config key.
+- `TCG_WRITE_PARQUET` environment variable.
+
+The `tcg.storage` library module remains for programmatic use:
+
+    from tcg.storage import append_snapshot, snapshot_to_rows
+    append_snapshot(snapshot_to_rows(...))
+
+The `[history]` extras (polars + duckdb) are unchanged. The CLI no
+longer offers parquet writing because the TSV output combined with
+`output_path` covers the "I want a file sitting somewhere" use case
+for nearly every CLI user. Programmatic users with bespoke historical
+storage needs can continue to import `tcg.storage` directly.
+
+### Added (introspection)
+- `--show-config` CLI flag: prints the resolved configuration with
+  per-field source attribution (`default` / `tcg.toml` / `env` / `cli`).
+  Helps verify "did my tcg.toml change actually take effect?" without
+  guessing.
+
+### Changed (introspection)
+- `--list-endpoints` renamed to `--show-endpoints`. The `--list-*` /
+  `--show-*` distinction now follows the convention used by `pip list`
+  vs `docker info`: `--list-X` enumerates a catalog (still:
+  `--list-product-lines`); `--show-X` prints internal state.
+
+### Added
+- `request_interval` config key (and `TCG_REQUEST_INTERVAL` env var).
+  Replaces the hardcoded 0.8s sleep between cards. Default: 0.8.
+  Lower = faster runs; higher = safer against rate limiting.
+
+### Documentation
+- `tcg.toml.example` reformatted with one section per setting and a
+  `# Default: ...` line in each. README's "Defaults" table no longer
+  duplicates default values — readers see them in one place
+  (`tcg.toml.example`) instead of three.
+- README "Sample output" clarifies that all prices are per-card.
+
 ## [1.0.0] — 2026-05-04
 
 First stable release. The TSV column order and exported dataclass fields

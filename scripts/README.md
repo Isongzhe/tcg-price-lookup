@@ -40,10 +40,10 @@ uv run python -m scripts.fetch_deck deck.txt \
 | `source` | (required) | Decklist file path, or `-` for stdin |
 | `--product-line TEXT` | config/env | Filter to this TCGplayer product line |
 | `--list-product-lines` | — | Print all 68 known product lines as `display<TAB>slug`, then exit |
-| `--list-endpoints` | — | Print a table of all TCGplayer endpoints in the catalog, then exit |
+| `--show-endpoints` | — | Print the TCGplayer endpoints this CLI is configured to call, then exit |
+| `--show-config` | — | Print the resolved configuration and where each value came from, then exit |
 | `--printings TEXT` | `Normal,Foil` | Comma-separated printing names. Use `all` for everything |
 | `--conditions TEXT` | `Near Mint` | Comma-separated condition tiers. Use `all` for everything |
-| `--parquet` | off (opt-in) | Append results to `data/snapshots.parquet` (requires `[history]` extras) |
 | `--no-copy` | — | Suppress auto-copy of TSV to clipboard for this run |
 | `--output PATH` | config/env | Write TSV to this file path in addition to stdout/clipboard |
 | `--config PATH` | — | Path to a TOML config file (overrides default search locations) |
@@ -57,7 +57,7 @@ decklist text
     ▼
 list[DeckEntry]
     │
-    │ for each entry (with a 0.8s pause between cards):
+    │ for each entry (with a configurable pause between cards; default 0.8s):
     │   client.autocomplete()             locate productId
     │     └─ if ambiguous (reprint aggregate):
     │        client.search_products()     enumerate every set → N products
@@ -74,8 +74,7 @@ list[DeckRow]  (one DeckRow per resolved product; reprints produce multiple)
     │   merge per-SKU market prices
     ▼
     ├──> stdout (TSV, also auto-copied to the system clipboard by default)
-    ├──> stderr (Rich progress bar + missing-card panel)
-    └──> data/snapshots.parquet (only when --parquet is set or write_parquet=true in config)
+    └──> stderr (Rich progress bar + missing-card panel)
 ```
 
 ### Key functions
@@ -122,11 +121,11 @@ Column notes:
 - **`set_code`** is TCGplayer's short set identifier (e.g. `DTR1E`, `PTM`).
 - **`number`** is the collector number within the set (e.g. `004`, `013`). Useful when distinguishing reprints that share a name but not a number.
 - **`released`** is the set's release date (ISO `YYYY-MM-DD`). Populated on reprint-expanded rows; empty for cards resolved through autocomplete only.
-- **`market_price`** is per-SKU, aggregated by TCGplayer over roughly the last 30 days of sales. Normal and Foil rows carry independent values. Not real-time.
+- **`market_price`** is the per-card SKU price aggregated by TCGplayer over roughly the last 30 days of sales. Normal and Foil rows carry independent values. Not real-time, and not multiplied by `qty`.
 - **`mp_sample`** is how many sales underlie `market_price`. Values ≥ 15 indicate a reliable price; values ≤ 3 mean the price is near-singleton — treat as indicative only.
-- **`most_recent_sale`** has no time bound. For illiquid cards it may be weeks or months old; always read it alongside `sale_count`.
-- **`sale_avg` / `sale_count`** cover the most recent 25 sales (hardcoded). The time span is driven by liquidity, not a date filter.
-- **`listing_*`** is a live snapshot of active listings at run time, not historical. Capped at 20 listings (hardcoded).
+- **`most_recent_sale`** is the per-card sale price of the single most recent sale. No time bound — for illiquid cards it may be weeks or months old; always read it alongside `sale_count`.
+- **`sale_avg` / `sale_count`** — `sale_avg` is the per-card mean across the most recent 25 sales (hardcoded). `sale_count` is how many of those sales fell into this `(printing, condition)` bucket.
+- **`listing_min` / `listing_avg` / `listing_count`** are per-card stats over the live snapshot of active listings. Not historical. Capped at 20 listings (hardcoded).
 - **`image_url`** is a 200 px CDN URL. Wrap with `=IMAGE()` in Google Sheets to render thumbnails.
 - **`missing`** contains a reason string when the card could not be resolved or an API call failed; it is empty otherwise.
 
@@ -139,7 +138,7 @@ Column notes:
 | `sale_avg` / `sale_count` | Up to 25 most recent sales |
 | `listing_*` | Live snapshot at run time |
 
-The CLI never caches — every invocation re-fetches. Cross-run history is opt-in via the `[history]` extras.
+The CLI never caches — every invocation re-fetches. For historical snapshots, import `tcg.storage` directly (requires the `[history]` extras).
 
 ### Default filtering
 
@@ -159,23 +158,14 @@ Summary totals (written to stderr) are computed on the unfiltered data so they r
 
 ### TOML config
 
-Two locations are probed in order when `--config` is not given:
+When `--config` is not given, the CLI looks for `./tcg.toml` in the current working directory. The shipped `tcg.toml.example` documents every available setting (one section per setting, with its default) — copy it and uncomment what you want to change:
 
-1. `./tcg.toml` — project-local (useful for per-deck defaults)
-2. `~/.config/tcg/config.toml` — user-global
-
-Full example with all keys:
-
-```toml
-product_line = "Grand Archive TCG"
-printings = ["Normal", "Foil"]
-conditions = ["Near Mint"]
-copy_to_clipboard = true
-write_parquet = false
-output_path = "~/Desktop/deck.tsv"   # ~ is expanded at load time
+```bash
+cp tcg.toml.example tcg.toml
+# edit tcg.toml
 ```
 
-Unknown keys emit a warning and are ignored; malformed TOML raises an error with the file path.
+Unknown keys emit a warning and are ignored; malformed TOML raises an error with the file path. Running without a `tcg.toml` is valid — built-in defaults apply silently.
 
 ### Environment variables
 
@@ -185,8 +175,8 @@ Unknown keys emit a warning and are ignored; malformed TOML raises an error with
 | `TCG_PRINTINGS` | `printings` | Comma-separated list or `all` |
 | `TCG_CONDITIONS` | `conditions` | Comma-separated list or `all` |
 | `TCG_COPY_TO_CLIPBOARD` | `copy_to_clipboard` | `1`/`0`, `true`/`false`, `yes`/`no` |
-| `TCG_WRITE_PARQUET` | `write_parquet` | `1`/`0`, `true`/`false`, `yes`/`no` |
 | `TCG_OUTPUT_PATH` | `output_path` | File path (`~` is expanded) |
+| `TCG_REQUEST_INTERVAL` | `request_interval` | Float, e.g. `0.5` or `1.2` |
 
 ### Precedence
 
@@ -229,7 +219,7 @@ Does not write any output file or clipboard content.
 `scripts/_clipboard.py` and `scripts/_config.py` are private to the CLI (leading-underscore names). They are not part of any public API and should not be imported from outside `scripts/`.
 
 - **`_clipboard.write_to_clipboard(text)`** — best-effort cross-platform clipboard write (macOS `pbcopy` / Windows `clip` / Linux `wl-copy` / `xclip` / `xsel`). Returns `False` silently when no clipboard tool is available.
-- **`_config.load_config(...)`** — loads CLI flag defaults from `~/.config/tcg/config.toml`, `./tcg.toml`, and `TCG_*` env vars. See `_config.py` for the full precedence implementation.
+- **`_config.load_config(...)`** — loads CLI flag defaults from `./tcg.toml` and `TCG_*` env vars. See `_config.py` for the full precedence implementation.
 
 ---
 
@@ -237,4 +227,4 @@ Does not write any output file or clipboard content.
 
 The `scripts/` layer contains only CLI-specific responsibilities: argument parsing, reading input from files or stdin, writing output to stdout/clipboard/stderr/file, and formatting.
 
-Core logic — constructing HTTP requests, parsing responses, grouping price data, writing Parquet — lives in `tcg/` and is reusable from non-CLI contexts. Alternative frontends (HTTP server, GUI, spreadsheet add-on) should be added as sibling directories without modifying `tcg/`.
+Core logic — constructing HTTP requests, parsing responses, grouping price data — lives in `tcg/` and is reusable from non-CLI contexts. Alternative frontends (HTTP server, GUI, spreadsheet add-on) should be added as sibling directories without modifying `tcg/`.

@@ -2,7 +2,6 @@
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-green.svg)](./LICENSE)
-[![Tests](https://img.shields.io/badge/tests-177%20passing-brightgreen.svg)](./tests)
 
 TCGplayer batch price lookup. Paste a deck → get a tab-separated price sheet → drop it into Google Sheets.
 
@@ -15,6 +14,8 @@ You have a card list. You want to know what each card costs on TCGplayer right n
 ---
 
 ## Quick start
+
+Requires [`uv`](https://docs.astral.sh/uv/getting-started/installation/) (a single-binary Python package manager).
 
 ```bash
 git clone https://github.com/Isongzhe/tcg-price-lookup.git
@@ -31,6 +32,8 @@ TSV is printed to your terminal AND copied to your clipboard. Paste it into a Go
 
 Tab-separated, one row per `card × printing × condition × reprint set`. Key columns at a glance:
 
+**All prices are per-card** (not multiplied by `qty`). For a deck total, multiply `qty × market_price` in your spreadsheet, or sum the column.
+
 | section | qty | card_name | set_name | printing | condition | market_price |
 |---|---|---|---|---|---|---|
 | Material Deck | 1 | Alice, Golden Queen | Distorted Reflections | Normal | Near Mint | 3.95 |
@@ -45,49 +48,60 @@ The CLI writes this output to **three places at once**: stdout, the system clipb
 
 ---
 
-## Defaults you might want to change
+## How it works
 
-| Setting | Default | How to change |
-|---|---|---|
-| Product line filter | (none — searches all TCGs) | `product_line = "Grand Archive TCG"` in config or `--product-line` flag |
-| Auto-copy to clipboard | on | `copy_to_clipboard = false` in config or `--no-copy` flag |
-| Save TSV to a file | (none — only stdout/clipboard) | `output_path = "prices/last_run.tsv"` in config or `--output PATH` flag |
-| Printings shown | `Normal,Foil` | `--printings all` for every printing, or comma-separated list |
-| Conditions shown | `Near Mint` | `--conditions all`, or comma-separated list |
-| Save snapshot to parquet | off | `--parquet` flag (requires `[history]` extras) |
+The CLI walks each card in your deck through five TCGplayer endpoints
+(autocomplete → search → product details → recent sales → live
+listings), aggregates Normal/Foil/condition variants, and emits one
+TSV row per `card × printing × condition × reprint set`. No TCGplayer
+API key required — see [`DISCLAIMER.md`](./DISCLAIMER.md) for how this
+works and what the limits are.
+
+Endpoints are catalogued in [`tcg/endpoints.py`](./tcg/endpoints.py);
+run `uv run python -m scripts.fetch_deck --show-endpoints` to inspect
+them.
 
 ---
 
-## Configuration
+## Defaults you might want to change
 
-Set defaults once and every run picks them up:
+The CLI works out of the box — you only need to set these if the defaults don't fit. Run `cat tcg.toml.example` to see every setting and its current default in one place.
 
-```toml
-# ~/.config/tcg/config.toml — set once, applies to every run
-product_line = "Grand Archive TCG"
-output_path = "prices/last_run.tsv"
-```
-
-All settings are also available as environment variables:
-
-| Env var | Config key |
+| Setting | How to change |
 |---|---|
-| `TCG_PRODUCT_LINE` | `product_line` |
-| `TCG_PRINTINGS` | `printings` |
-| `TCG_CONDITIONS` | `conditions` |
-| `TCG_COPY_TO_CLIPBOARD` | `copy_to_clipboard` |
-| `TCG_WRITE_PARQUET` | `write_parquet` |
-| `TCG_OUTPUT_PATH` | `output_path` |
-
-Precedence: CLI flags > env vars > TOML > built-in defaults. See [`scripts/README.md`](./scripts/README.md) for the full lookup order and CLI flag reference.
+| Product line filter | `product_line` in `tcg.toml` or `--product-line` flag |
+| Auto-copy to clipboard | `copy_to_clipboard` in `tcg.toml` or `--no-copy` flag |
+| Save TSV to a file | `output_path` in `tcg.toml` or `--output PATH` flag |
+| Printings shown | `printings` in `tcg.toml` or `--printings` flag |
+| Conditions shown | `conditions` in `tcg.toml` or `--conditions` flag |
+| Sleep between cards | `request_interval` in `tcg.toml` |
 
 ---
 
 ## Google Sheets template
 
-The repo includes a Google Sheets template with a one-click Apps Script formatter. Run it after pasting your TSV and it transforms the raw data into a styled table: card image thumbnails in column A, a dark header bar, zebra banding, currency formatting on `market_price`, and metadata columns hidden by default (they can be re-expanded with the `[+]` toggle).
+The repo includes a Google Sheets template with a one-click Apps Script
+formatter. Run it after pasting your TSV and it transforms the raw
+data into a styled table: card image thumbnails in column A, a dark
+header bar, zebra banding, currency formatting on `market_price`, and
+metadata columns hidden by default (re-expand with the `[+]` toggle).
 
-Full instructions and a copy-template link are in [`sheets/README.md`](./sheets/README.md).
+**[Copy the template to your Drive →](https://docs.google.com/spreadsheets/d/1u7r0ND0wkUTGl7k8jDayK74l2U4KIlu_WLfJCR0dgcg/copy)**
+
+Setup instructions and source code in [`sheets/README.md`](./sheets/README.md).
+
+---
+
+## Configure defaults
+
+Optional. Default behaviour works without setup. To set personal
+defaults once instead of typing flags every run:
+
+    cp tcg.toml.example tcg.toml
+    # then edit tcg.toml — every key is documented inline
+
+For environment-variable overrides and full precedence rules, see
+[`scripts/README.md`](./scripts/README.md).
 
 ---
 
