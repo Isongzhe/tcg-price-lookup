@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from tcg.client import TCGplayerClient
+from tcg.client import TCGplayerClient, TCGplayerError
 from tcg.models import AutocompleteHit
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -252,8 +252,6 @@ def test_error_raises_after_retry(client):
 
     fake.request = always_403
 
-    from tcg.client import TCGplayerError
-
     with pytest.raises(TCGplayerError):
         c.latest_sales(644912)
 
@@ -402,3 +400,89 @@ def test_impersonate_target_is_supported_by_curl_cffi():
         f"{_IMPERSONATE} not in installed curl_cffi's BrowserType enum. "
         f"Run `[v.value for v in BrowserType]` to see options."
     )
+
+
+# ---------------------------------------------------------------------------
+# RETRYABLE_STATUS_CODES — 400, 5xx retry coverage
+# ---------------------------------------------------------------------------
+
+
+def _details_payload(product_id: int = 644912) -> dict:
+    return {
+        "productId": product_id,
+        "productName": "Alice, Golden Queen",
+        "setName": "Distorted Reflections",
+        "skus": [],
+    }
+
+
+def test_retry_on_400_then_succeeds(client):
+    """Transient 400 — retry once and the second attempt succeeds.
+
+    TCGplayer's product-details endpoint occasionally returns 400 due
+    to backend cache misses; the same productId returns 200 on a
+    retry seconds later. The client must absorb this transparently.
+    """
+    c, fake = client
+
+    call_count = {"n": 0}
+
+    def flaky_request(method, url, **kwargs):
+        fake.calls.append({"method": method, "url": url, **kwargs})
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return FakeResponse(400, {"error": "transient"})
+        return FakeResponse(200, _details_payload())
+
+    fake.request = flaky_request
+    c._warmed_up = True
+
+    details = c.product_details(644912)
+    assert details is not None
+    assert details.product_id == 644912
+    assert call_count["n"] == 2
+
+
+def test_retry_on_500_then_succeeds(client):
+    """Same pattern for 5xx server errors."""
+    c, fake = client
+
+    call_count = {"n": 0}
+
+    def flaky_request(method, url, **kwargs):
+        fake.calls.append({"method": method, "url": url, **kwargs})
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return FakeResponse(500, {"error": "server fault"})
+        return FakeResponse(200, _details_payload())
+
+    fake.request = flaky_request
+    c._warmed_up = True
+
+    details = c.product_details(644912)
+    assert details is not None
+    assert details.product_id == 644912
+    assert call_count["n"] == 2
+
+
+def test_persistent_400_raises_after_retry(client):
+    """If retry also fails, raise TCGplayerError."""
+    c, fake = client
+
+    def always_400(method, url, **kwargs):
+        fake.calls.append({"method": method, "url": url, **kwargs})
+        return FakeResponse(400, {"error": "persistent"})
+
+    fake.request = always_400
+    c._warmed_up = True
+
+    with pytest.raises(TCGplayerError):
+        c.product_details(644912)
+
+
+def test_retryable_codes_includes_expected_set():
+    """Sanity check on RETRYABLE_STATUS_CODES membership."""
+    from tcg.client import RETRYABLE_STATUS_CODES
+
+    expected = {400, 403, 429, 500, 502, 503, 504}
+    assert {int(code) for code in RETRYABLE_STATUS_CODES} == expected
