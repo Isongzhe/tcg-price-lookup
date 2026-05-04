@@ -1,18 +1,18 @@
-"""批次查詢整份牌表的價格。
+"""Batch fetch prices for an entire decklist.
 
-用法:
-    # 從檔案
+Usage:
+    # From a file
     uv run python -m scripts.fetch_deck deck.txt
 
-    # 從 stdin（貼上後 Ctrl+D 結束；或用管線）
+    # From stdin (paste, then Ctrl+D; or pipe)
     pbpaste | uv run python -m scripts.fetch_deck -
 
-    # 只看某個卡池 + 輸出 JSON
-    uv run python -m scripts.fetch_deck deck.txt \
-        --product-line "Grand Archive TCG" \
-        --json deck_prices.json
+    # Specify a product line, suppress clipboard copy
+    uv run python -m scripts.fetch_deck deck.txt \\
+        --product-line "Grand Archive TCG" \\
+        --no-copy
 
-牌表格式:
+Decklist format:
     # Material Deck
     1 Alice, Golden Queen
 
@@ -23,7 +23,7 @@
 from __future__ import annotations
 
 import argparse
-import json
+import io
 import re
 import sys
 import time
@@ -43,8 +43,11 @@ from rich.progress import (
 )
 
 from tcg.client import TCGplayerClient, TCGplayerError
+from tcg.clipboard import write_to_clipboard
+from tcg.config import load_config
 from tcg.deck import DeckEntry, parse_decklist
 from tcg.models import AutocompleteHit, Listing, MarketPrice, ProductDetails, Sale
+from tcg.product_lines import PRODUCT_LINES, suggest, to_slug
 from tcg.storage import HISTORY_AVAILABLE, append_snapshot, snapshot_to_rows
 
 # All human-facing output goes through this console (stderr). stdout is
@@ -52,6 +55,11 @@ from tcg.storage import HISTORY_AVAILABLE, append_snapshot, snapshot_to_rows
 console = Console(stderr=True)
 
 _SPECIAL_SUFFIX_RE = re.compile(r"\s*\([^)]+\)\s*$")
+
+# Hardcoded internals — not user-facing flags.
+_SLEEP_BETWEEN_CARDS = 0.8
+_LISTINGS_LIMIT = 20
+_SALES_LIMIT = 25
 
 
 def pick_best_hit(
@@ -80,17 +88,18 @@ def pick_best_hit(
 
 @dataclass
 class VariantStats:
-    """一張卡一個（printing, condition）組合的價格統計。"""
+    """Price statistics for one (printing, condition) combination of a card."""
+
     printing: str           # "Normal" / "Foil"
     condition: str          # "Near Mint" / "Lightly Played" / ...
-    sku_id: int | None              # 該 variant 的 TCGplayer SKU
-    market_price: float | None       # 該 variant 的 Market Price（Normal / Foil 各有一個）
-    market_price_count: int | None   # market price 背後的樣本數
+    sku_id: int | None              # TCGplayer SKU for this variant
+    market_price: float | None      # Market price for this variant (Normal and Foil have separate values)
+    market_price_count: int | None  # Number of data points behind the market price
     listing_min: float | None
     listing_avg: float | None
     listing_count: int
     sale_avg: float | None
-    most_recent_sale: float | None   # 按 orderDate 最近一筆
+    most_recent_sale: float | None  # Most recent sale by orderDate
     sale_count: int
 
 
@@ -205,13 +214,11 @@ def _fetch_one_product(
     fallback_name: str,
     fallback_set: str | None,
     fallback_release_date: str | None,
-    listings_limit: int,
-    sales_limit: int,
 ) -> tuple[DeckRow, list, list]:
     """Fetch all per-variant price data for a single product and build a DeckRow."""
     details = client.product_details(product_id)
-    sales = client.latest_sales(product_id, limit=sales_limit)
-    listings = client.listings(product_id, limit=listings_limit)
+    sales = client.latest_sales(product_id, limit=_SALES_LIMIT)
+    listings = client.listings(product_id, limit=_LISTINGS_LIMIT)
 
     market_by_sku: dict[int, MarketPrice] = {}
     if details is not None and details.skus:
@@ -243,8 +250,6 @@ def enrich(
     client: TCGplayerClient,
     entry: DeckEntry,
     product_line: str | None,
-    listings_limit: int,
-    sales_limit: int,
 ) -> list[tuple[DeckRow, list, list]]:
     """Resolve a decklist entry to one or more DeckRow results.
 
@@ -276,13 +281,10 @@ def enrich(
             fallback_name=hit.product_name,
             fallback_set=hit.set_name,
             fallback_release_date=None,
-            listings_limit=listings_limit,
-            sales_limit=sales_limit,
         )]
 
     # Step 2: autocomplete did not resolve — likely a reprint aggregate.
-    # Fall back to the search API to enumerate every set the card appears
-    # in.
+    # Fall back to the search API to enumerate every set the card appears in.
     try:
         candidates = client.search_products(entry.card_name, product_line=product_line)
     except TCGplayerError as e:
@@ -305,8 +307,7 @@ def enrich(
             [], [],
         )]
 
-    # Order newest release first — matches the user's "復刻比較便宜"
-    # reading pattern: the first row is the most recent reprint.
+    # Order newest release first — the first row is the most recent reprint.
     candidates.sort(key=lambda c: c.release_date or "", reverse=True)
 
     return [
@@ -315,8 +316,6 @@ def enrich(
             fallback_name=c.product_name,
             fallback_set=c.set_name,
             fallback_release_date=c.release_date,
-            listings_limit=listings_limit,
-            sales_limit=sales_limit,
         )
         for c in candidates
     ]
@@ -326,9 +325,19 @@ def _fmt(v: float | None) -> str:
     return f"{v:.2f}" if v is not None else ""
 
 
-def print_tsv(rows: list[DeckRow], variants_filter: set[str] | None = None) -> None:
-    """One row per (card × variant). Raw data only — aggregation is Sheet's job.
-    variants_filter: if given, only emit rows whose printing is in the set."""
+def print_tsv(
+    rows: list[DeckRow],
+    variants_filter: set[str] | None = None,
+    file: "io.TextIOBase | None" = None,
+) -> None:
+    """One row per (card x variant). Raw data only — aggregation is Sheet's job.
+
+    variants_filter: if given, only emit rows whose printing is in the set.
+    file: output target; defaults to sys.stdout.
+    """
+    if file is None:
+        file = sys.stdout
+
     headers = [
         "section", "qty", "card_name", "matched_name",
         "set_name", "set_code", "number", "rarity",
@@ -342,11 +351,12 @@ def print_tsv(rows: list[DeckRow], variants_filter: set[str] | None = None) -> N
         "image_url",
         "missing",
     ]
+
     def _release(r: DeckRow) -> str:
         # Keep just the YYYY-MM-DD portion so the cell is short and sorts cleanly.
         return (r.release_date or "")[:10]
 
-    print("\t".join(headers))
+    print("\t".join(headers), file=file)
     for r in rows:
         if not r.variants:
             print("\t".join([
@@ -361,7 +371,7 @@ def print_tsv(rows: list[DeckRow], variants_filter: set[str] | None = None) -> N
                 "", "", "0",
                 r.image_url or "",
                 r.missing_reason or "",
-            ]))
+            ]), file=file)
             continue
         for v in r.variants:
             if variants_filter and v.printing not in variants_filter:
@@ -380,13 +390,12 @@ def print_tsv(rows: list[DeckRow], variants_filter: set[str] | None = None) -> N
                 _fmt(v.listing_min), _fmt(v.listing_avg), str(v.listing_count),
                 r.image_url or "",
                 "",
-            ]))
+            ]), file=file)
 
 
-def print_summary(rows: list[DeckRow], stdout_piped: bool) -> None:
-    """Post-run UX focused on what the user needs to act on:
-    a loud banner for cards that failed, a one-line status count,
-    and a clipboard hint when stdout was piped.
+def print_summary(rows: list[DeckRow], clipboard_copied: bool) -> None:
+    """Post-run UX: loud banner for missing cards, one-line status count,
+    and clipboard status.
 
     Aggregation totals are intentionally omitted — that belongs in the
     spreadsheet where the user controls which printing/condition counts.
@@ -427,17 +436,22 @@ def print_summary(rows: list[DeckRow], stdout_piped: bool) -> None:
         status_line += f"  [red]· {len(missing)} missing[/red]"
     console.print(status_line)
 
-    if stdout_piped:
-        console.print(
-            "[cyan]TSV sent to stdout.[/cyan] "
-            "[dim]If you piped to `pbcopy` / `xclip` / `wl-copy`, "
-            "it is on your clipboard now — paste into Sheets.[/dim]"
-        )
+    if clipboard_copied:
+        console.print("[green]Copied TSV to clipboard.[/green]")
     else:
-        console.print(
-            "[dim]TSV printed above. Pipe to `| pbcopy` "
-            "(macOS) or `| xclip -selection clipboard` (Linux) to copy.[/dim]"
-        )
+        # Stdout might have been piped — give the usual hint.
+        stdout_piped = not sys.stdout.isatty()
+        if stdout_piped:
+            console.print(
+                "[cyan]TSV sent to stdout.[/cyan] "
+                "[dim]If you piped to `pbcopy` / `xclip` / `wl-copy`, "
+                "it is on your clipboard now — paste into Sheets.[/dim]"
+            )
+        else:
+            console.print(
+                "[dim]TSV printed above. Pipe to `| pbcopy` "
+                "(macOS) or `| xclip -selection clipboard` (Linux) to copy.[/dim]"
+            )
 
 
 def read_input(source: str) -> str:
@@ -448,29 +462,83 @@ def read_input(source: str) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Batch fetch prices for a decklist")
-    parser.add_argument("source", help="path to decklist file, or '-' for stdin")
-    parser.add_argument("--product-line", default=None, help="e.g. 'Grand Archive TCG'")
-    parser.add_argument("--json", dest="json_out", default=None, help="write detailed JSON to this path")
     parser.add_argument(
-        "--no-parquet",
-        action="store_true",
-        help="skip appending to data/snapshots.parquet "
-             "(only relevant when the `history` optional extras are installed)",
+        "source",
+        nargs="?",
+        default=None,
+        help="path to decklist file, or '-' for stdin",
     )
-    parser.add_argument("--sleep", type=float, default=0.8, help="seconds between cards (politeness)")
-    parser.add_argument("--listings", type=int, default=20)
-    parser.add_argument("--sales", type=int, default=25)
+    parser.add_argument(
+        "--product-line",
+        default=None,
+        help="filter to a specific product line, e.g. 'Grand Archive TCG' (default from config)",
+    )
+    parser.add_argument(
+        "--list-product-lines",
+        action="store_true",
+        help="print all known product lines as display<TAB>slug, then exit",
+    )
     parser.add_argument(
         "--printings",
-        default="Normal,Foil",
-        help="comma-separated printings to show (default: Normal,Foil). Use 'all' for everything.",
+        default=None,
+        help="comma-separated printings to show (default from config: Normal,Foil). Use 'all' for everything.",
     )
     parser.add_argument(
         "--conditions",
-        default="Near Mint",
-        help="comma-separated conditions to show (default: 'Near Mint'). Use 'all' for everything.",
+        default=None,
+        help="comma-separated conditions to show (default from config: Near Mint). Use 'all' for everything.",
+    )
+    parser.add_argument(
+        "--parquet",
+        action="store_true",
+        default=False,
+        help="append a snapshot to data/snapshots.parquet (opt-in; requires the 'history' extras)",
+    )
+    parser.add_argument(
+        "--no-copy",
+        action="store_true",
+        help="disable auto-copy of TSV to clipboard for this run",
+    )
+    parser.add_argument(
+        "--config",
+        dest="config_path",
+        default=None,
+        type=Path,
+        help="path to a TOML config file (overrides default search locations)",
     )
     args = parser.parse_args(argv)
+
+    # --list-product-lines: print and exit immediately (before config needed)
+    if args.list_product_lines:
+        for display, slug in PRODUCT_LINES.items():
+            print(f"{display}\t{slug}")
+        return 0
+
+    if args.source is None:
+        parser.error("the following arguments are required: source")
+
+    # Build config — CLI values only override when explicitly passed (non-None).
+    cli_overrides: dict = {}
+    if args.product_line is not None:
+        cli_overrides["product_line"] = args.product_line
+    if args.printings is not None:
+        # Convert comma string to list for the config layer
+        cli_overrides["printings"] = [p.strip() for p in args.printings.split(",") if p.strip()]
+    if args.conditions is not None:
+        cli_overrides["conditions"] = [c.strip() for c in args.conditions.split(",") if c.strip()]
+    if args.parquet:
+        cli_overrides["write_parquet"] = True
+
+    config = load_config(cli_overrides, config_path=args.config_path)
+
+    # Soft validation of --product-line
+    if args.product_line is not None and to_slug(args.product_line) is None:
+        console.print(
+            f"[yellow]Warning: product line {args.product_line!r} is not in the known list.[/yellow]"
+        )
+        hints = suggest(args.product_line)
+        if hints:
+            console.print(f"[dim]Did you mean: {', '.join(hints)}?[/dim]")
 
     text = read_input(args.source)
     entries = parse_decklist(text)
@@ -506,16 +574,8 @@ def main(argv: list[str] | None = None) -> int:
                 task_id,
                 description=f"[cyan]{entry.quantity}x[/cyan] {entry.card_name}",
             )
-            results = enrich(
-                client, entry, args.product_line,
-                listings_limit=args.listings, sales_limit=args.sales,
-            )
-            # Reprinted cards produce one (row, sales, listings) per set.
-            # Parquet snapshot writing is opt-in: requires `history` extras
-            # AND the --no-parquet flag being off. If extras aren't installed
-            # the append is silently skipped — the core TSV workflow does
-            # not depend on it.
-            parquet_enabled = HISTORY_AVAILABLE and not args.no_parquet
+            results = enrich(client, entry, config.product_line)
+            parquet_enabled = HISTORY_AVAILABLE and (args.parquet or config.write_parquet)
             for row, sales, listings in results:
                 rows.append(row)
                 if parquet_enabled and row.product_id is not None:
@@ -528,14 +588,18 @@ def main(argv: list[str] | None = None) -> int:
 
             progress.advance(task_id)
             if i < len(entries):
-                time.sleep(args.sleep)
+                time.sleep(_SLEEP_BETWEEN_CARDS)
+
+    # Resolve filter sets from config
+    printings_str = ",".join(config.printings)
+    conditions_str = ",".join(config.conditions)
 
     printings_filter: set[str] | None = None
     conditions_filter: set[str] | None = None
-    if args.printings.strip().lower() != "all":
-        printings_filter = {p.strip() for p in args.printings.split(",") if p.strip()}
-    if args.conditions.strip().lower() != "all":
-        conditions_filter = {c.strip() for c in args.conditions.split(",") if c.strip()}
+    if printings_str.strip().lower() != "all":
+        printings_filter = {p.strip() for p in config.printings if p.strip()}
+    if conditions_str.strip().lower() != "all":
+        conditions_filter = {c.strip() for c in config.conditions if c.strip()}
 
     # Apply condition filter by pruning variants before output (printing filter
     # handled inline in print_tsv so summary stays accurate).
@@ -543,18 +607,21 @@ def main(argv: list[str] | None = None) -> int:
         for r in rows:
             r.variants = [v for v in r.variants if v.condition in conditions_filter]
 
-    print_tsv(rows, variants_filter=printings_filter)
-    # If stdout is not a TTY we assume the caller piped it somewhere
-    # (clipboard utility, file, another program). Surface a hint.
-    stdout_piped = not sys.stdout.isatty()
-    print_summary(rows, stdout_piped=stdout_piped)
+    # Build TSV into a buffer so we can print it AND copy to clipboard.
+    tsv_buf = io.StringIO()
+    print_tsv(rows, variants_filter=printings_filter, file=tsv_buf)
+    tsv_text = tsv_buf.getvalue()
 
-    if args.json_out:
-        Path(args.json_out).write_text(
-            json.dumps([asdict(r) for r in rows], indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
-        console.print(f"[green]JSON written to[/green] [cyan]{args.json_out}[/cyan]")
+    # Print TSV to stdout
+    sys.stdout.write(tsv_text)
+    sys.stdout.flush()
+
+    # Auto-clipboard
+    clipboard_copied = False
+    if config.copy_to_clipboard and not args.no_copy:
+        clipboard_copied = write_to_clipboard(tsv_text)
+
+    print_summary(rows, clipboard_copied=clipboard_copied)
 
     return 0
 
